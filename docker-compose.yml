@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  sandbox:
+    build: .
+    container_name: thanx-sandbox
+    volumes:
+      # Mount submissions directory
+      - ./submissions:/sandbox/submissions
+      # Mount extracted directory
+      - ./extracted:/sandbox/extracted
+      # Share Docker socket for Docker-in-Docker (if needed)
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ENV=development
+    # Use host network for submissions that might run servers
+    network_mode: "host"
+    # Security options
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    cap_add:
+      - SYS_ADMIN
+    stdin_open: true
+    tty: true
+    command: /bin/bash
