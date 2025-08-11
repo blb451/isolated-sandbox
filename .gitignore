@@ -1,6 +1,11 @@
-# Submission files
+# Sandbox working directories
 submissions/
 extracted/
+audit/
+
+# Docker overrides and volumes
+docker-compose.override.yml
+docker-volumes/
 
 # OS files
 .DS_Store
@@ -15,10 +20,11 @@ Thumbs.db
 # Logs
 *.log
 
-# Docker volumes
-docker-volumes/
-
 # Temporary files
 *.tmp
 *.temp
 *.cache
+
+# Backup files
+*.bak
+*.backup
