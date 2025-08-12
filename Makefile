@@ -24,12 +24,19 @@ install:
 		echo "  - pre-commit: https://pre-commit.com"; \
 	fi
 
-# Setup pre-commit hooks
+# Setup pre-commit hooks with auto-staging
 setup-hooks:
-	@echo "Installing pre-commit hooks..."
+	@echo "Installing pre-commit hooks with auto-staging..."
 	pre-commit install
+	@echo "Configuring auto-staging for fixed files..."
+	@chmod +x scripts/auto-stage-hook.sh
+	@echo '#!/bin/bash' > .git/hooks/pre-commit
+	@echo '# Auto-generated hook that stages fixes from pre-commit' >> .git/hooks/pre-commit
+	@echo 'exec scripts/auto-stage-hook.sh' >> .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
 	@echo "Running hooks on all files..."
 	pre-commit run --all-files || echo "Some files were formatted - review changes"
+	@echo "✅ Pre-commit hooks installed with auto-staging enabled!"
 
 # Lint shell scripts and Docker files (non-fixable checks)
 lint:
