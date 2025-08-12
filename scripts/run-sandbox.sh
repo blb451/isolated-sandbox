@@ -82,6 +82,22 @@ print_message "$GREEN" "✓ File copied to submissions directory"
 
 # Build Docker image if needed
 echo
+print_message "$YELLOW" "Checking Docker status..."
+
+# Check if Docker daemon is running with timeout
+if ! timeout 5 docker info >/dev/null 2>&1; then
+    if [ $? -eq 124 ]; then
+        print_message "$RED" "Error: Docker is not responding (timed out)"
+        print_message "$YELLOW" "Docker Desktop may be starting up. Please wait and try again."
+    else
+        print_message "$RED" "Error: Docker is not running!"
+        print_message "$YELLOW" "Please start Docker Desktop and try again."
+    fi
+    exit 1
+fi
+
+print_message "$GREEN" "✓ Docker is running"
+echo
 print_message "$YELLOW" "Building/updating Docker environment..."
 
 # Check if this is the first build
@@ -92,7 +108,17 @@ if ! docker images | grep -q "thanx-isolated-sandbox-sandbox"; then
     echo
 fi
 
-docker-compose build
+# Build with timeout and error handling
+if ! timeout 300 docker-compose build; then
+    if [ $? -eq 124 ]; then
+        print_message "$RED" "Error: Docker build timed out after 5 minutes"
+        print_message "$YELLOW" "This might indicate a network issue or Docker problem"
+    else
+        print_message "$RED" "Error: Docker build failed"
+        print_message "$YELLOW" "Please check Docker logs for more information"
+    fi
+    exit 1
+fi
 
 # Run virus scan inside Docker
 echo
@@ -104,8 +130,15 @@ if ! docker-compose run --rm sandbox bash -c "
     # Run ClamAV scan
     clamscan --infected --remove=no --recursive /sandbox/submissions/$submission_name
 "; then
-    print_message "$RED" "⚠️  WARNING: Virus or malware detected!"
-    print_message "$RED" "The submission has been quarantined and will not be extracted."
+    # Check if the failure was due to Docker issues
+    if ! timeout 5 docker info >/dev/null 2>&1; then
+        print_message "$RED" "Error: Docker connection lost during scan."
+        print_message "$RED" "The process cannot continue."
+    else
+        # This means ClamAV actually detected malware
+        print_message "$RED" "⚠️  WARNING: Virus or malware detected!"
+        print_message "$RED" "The submission has been quarantined and will not be extracted."
+    fi
 
     # Ask if user wants to proceed anyway (for testing purposes)
     echo
@@ -170,6 +203,14 @@ EOF
 # Run recursive virus scan on extracted contents
 echo
 print_message "$YELLOW" "Running deep virus scan on extracted files..."
+
+# First check if Docker is running
+if ! timeout 5 docker info >/dev/null 2>&1; then
+    print_message "$RED" "Error: Cannot connect to Docker daemon."
+    print_message "$RED" "Please ensure Docker is running and try again."
+    exit 1
+fi
+
 if ! docker-compose run --rm sandbox bash -c "
     # Update virus definitions
     freshclam 2>/dev/null || true
@@ -177,8 +218,15 @@ if ! docker-compose run --rm sandbox bash -c "
     # Run recursive ClamAV scan on extracted contents
     clamscan --infected --remove=no --recursive /sandbox/extracted
 "; then
-    print_message "$RED" "⚠️  WARNING: Virus or malware detected in extracted files!"
-    print_message "$RED" "The submission contains dangerous code and should not be executed."
+    # Check if the failure was due to Docker issues
+    if ! timeout 5 docker info >/dev/null 2>&1; then
+        print_message "$RED" "Error: Docker connection lost during scan."
+        print_message "$RED" "The process cannot continue."
+    else
+        # This means ClamAV actually detected malware
+        print_message "$RED" "⚠️  WARNING: Virus or malware detected in extracted files!"
+        print_message "$RED" "The submission contains dangerous code and should not be executed."
+    fi
 
     # Ask if user wants to proceed anyway (for testing purposes)
     echo
@@ -202,49 +250,126 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ ]]; then
     echo
     print_message "$YELLOW" "Running security analysis tools..."
 
+    # Create a timestamp for the report files
+    TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+    REPORT_DIR="audit/security_reports/${base_name}_${TIMESTAMP}"
+    mkdir -p "$REPORT_DIR"
+
     docker-compose run --rm sandbox bash -c "
         cd $EXTRACTED_PROJECT_PATH
 
-        echo '=== Static Analysis Results ==='
+        # Create temp directory for reports
+        TEMP_DIR=/tmp/security_analysis_$$
+        mkdir -p \$TEMP_DIR
+
+        echo '🔍 Running security analysis...'
+        echo
 
         # Python security analysis
         if find . -name '*.py' -type f | head -1 > /dev/null 2>&1; then
-            echo '--- Python Security (Bandit) ---'
-            bandit -r . -f txt 2>/dev/null || echo 'No Python security issues found or bandit failed'
-            echo
-            echo '--- Python Dependencies (Safety) ---'
-            if [ -f requirements.txt ]; then
-                safety check -r requirements.txt 2>/dev/null || echo 'Safety check completed or failed'
-            elif [ -f Pipfile ]; then
-                safety check 2>/dev/null || echo 'Safety check completed or failed'
+            echo -n '  Analyzing Python code with Bandit... '
+            bandit -r . -f txt > \$TEMP_DIR/bandit.txt 2>&1
+            BANDIT_LINES=\$(wc -l < \$TEMP_DIR/bandit.txt)
+            if [ \$BANDIT_LINES -gt 50 ]; then
+                echo \"✓ (found \$BANDIT_LINES lines of output - saved to report)\"
+                head -20 \$TEMP_DIR/bandit.txt
+                echo
+                echo \"    ... output truncated. Full report saved to: audit/security_reports/\"
             else
-                echo 'No Python requirements file found'
+                echo '✓'
+                cat \$TEMP_DIR/bandit.txt
+            fi
+            echo
+
+            echo -n '  Checking Python dependencies with Safety... '
+            if [ -f requirements.txt ]; then
+                safety check -r requirements.txt > \$TEMP_DIR/safety.txt 2>&1
+                SAFETY_LINES=\$(wc -l < \$TEMP_DIR/safety.txt)
+                if [ \$SAFETY_LINES -gt 30 ]; then
+                    echo \"✓ (found \$SAFETY_LINES lines of output - saved to report)\"
+                    head -10 \$TEMP_DIR/safety.txt
+                    echo \"    ... output truncated. Full report saved to: audit/security_reports/\"
+                else
+                    echo '✓'
+                    cat \$TEMP_DIR/safety.txt
+                fi
+            else
+                echo 'No requirements.txt found'
             fi
             echo
         fi
 
         # Shell script security
         if find . -name '*.sh' -type f | head -1 > /dev/null 2>&1; then
-            echo '--- Shell Script Analysis (ShellCheck) ---'
-            find . -name '*.sh' -type f -exec shellcheck {} \; 2>/dev/null || echo 'ShellCheck analysis completed'
+            echo -n '  Analyzing shell scripts with ShellCheck... '
+            find . -name '*.sh' -type f -exec shellcheck {} \; > \$TEMP_DIR/shellcheck.txt 2>&1
+            SHELL_LINES=\$(wc -l < \$TEMP_DIR/shellcheck.txt)
+            if [ \$SHELL_LINES -gt 50 ]; then
+                echo \"✓ (found \$SHELL_LINES lines of output - saved to report)\"
+                head -20 \$TEMP_DIR/shellcheck.txt
+                echo \"    ... output truncated. Full report saved to: audit/security_reports/\"
+            else
+                echo '✓'
+                cat \$TEMP_DIR/shellcheck.txt
+            fi
             echo
         fi
 
         # General code security with Semgrep
-        echo '--- Code Security Patterns (Semgrep) ---'
-        semgrep --config=auto --quiet . 2>/dev/null || echo 'Semgrep analysis completed'
+        echo -n '  Running Semgrep security patterns... '
+        semgrep --config=auto --quiet . > \$TEMP_DIR/semgrep.txt 2>&1
+        SEMGREP_LINES=\$(wc -l < \$TEMP_DIR/semgrep.txt)
+        if [ \$SEMGREP_LINES -gt 50 ]; then
+            echo \"✓ (found \$SEMGREP_LINES lines of output - saved to report)\"
+            head -20 \$TEMP_DIR/semgrep.txt
+            echo \"    ... output truncated. Full report saved to: audit/security_reports/\"
+        else
+            echo '✓'
+            cat \$TEMP_DIR/semgrep.txt
+        fi
         echo
 
-        # YARA malware detection on suspicious files
-        echo '--- Malware Pattern Detection (YARA) ---'
+        # YARA malware detection
+        echo -n '  Scanning for malware patterns with YARA... '
         if [ -d /opt/yara-rules/rules ]; then
-            find . -type f \( -name '*.exe' -o -name '*.dll' -o -name '*.jar' -o -name '*.zip' -o -name '*.tar*' \) -exec yara -r /opt/yara-rules/rules {} \; 2>/dev/null || echo 'No malware patterns detected'
+            find . -type f \( -name '*.exe' -o -name '*.dll' -o -name '*.jar' -o -name '*.zip' -o -name '*.tar*' \) -exec yara -r /opt/yara-rules/rules {} \; > \$TEMP_DIR/yara.txt 2>&1
+            YARA_LINES=\$(wc -l < \$TEMP_DIR/yara.txt)
+            if [ \$YARA_LINES -gt 0 ]; then
+                echo \"⚠️  SUSPICIOUS FILES DETECTED\"
+                cat \$TEMP_DIR/yara.txt
+            else
+                echo '✓ No malware patterns detected'
+            fi
         else
             echo 'YARA rules not available'
         fi
+        echo
 
-        echo '=== Security Analysis Complete ==='
+        # Copy reports to host
+        cp \$TEMP_DIR/* /sandbox/audit/security_reports/${base_name}_${TIMESTAMP}/ 2>/dev/null || true
+
+        # Summary
+        echo '═══════════════════════════════════════════════════════════'
+        echo '📊 Security Analysis Summary:'
+        echo
+        [ -f \$TEMP_DIR/bandit.txt ] && echo \"  • Python (Bandit): \$(grep -c 'Issue:' \$TEMP_DIR/bandit.txt 2>/dev/null || echo '0') issues found\"
+        [ -f \$TEMP_DIR/safety.txt ] && echo \"  • Dependencies (Safety): \$(grep -c 'vulnerability' \$TEMP_DIR/safety.txt 2>/dev/null || echo '0') vulnerabilities\"
+        [ -f \$TEMP_DIR/shellcheck.txt ] && echo \"  • Shell Scripts: \$(grep -c 'SC[0-9]' \$TEMP_DIR/shellcheck.txt 2>/dev/null || echo '0') warnings\"
+        [ -f \$TEMP_DIR/semgrep.txt ] && echo \"  • Code Patterns (Semgrep): \$(grep -c 'found:' \$TEMP_DIR/semgrep.txt 2>/dev/null || echo '0') findings\"
+        [ -f \$TEMP_DIR/yara.txt ] && [ -s \$TEMP_DIR/yara.txt ] && echo \"  • Malware Patterns: DETECTED - CHECK REPORT\"
+        echo
+        echo \"📁 Full reports saved to: audit/security_reports/${base_name}_${TIMESTAMP}/\"
+        echo '═══════════════════════════════════════════════════════════'
+
+        # Clean up
+        rm -rf \$TEMP_DIR
     " || print_message "$YELLOW" "Some security tools may have encountered issues (this is normal)"
+
+    # Check if reports were created
+    if [ -d "$REPORT_DIR" ] && [ "$(ls -A $REPORT_DIR 2>/dev/null)" ]; then
+        echo
+        print_message "$GREEN" "✓ Security reports saved to: $REPORT_DIR"
+    fi
 fi
 
 # Show extracted contents

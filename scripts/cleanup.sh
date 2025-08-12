@@ -185,3 +185,6 @@ du -sh extracted 2>/dev/null | awk '{print "  Extracted: " $1}'
 du -sh submissions 2>/dev/null | awk '{print "  Submissions: " $1}'
 du -sh audit 2>/dev/null | awk '{print "  Audit logs: " $1}'
 docker system df | grep -E "Images|Containers" | awk '{print "  Docker " $1 ": " $2}'
+
+# Exit the script
+exit 0
