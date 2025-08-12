@@ -99,16 +99,29 @@ sudo apt-get install shellcheck
 
 1. **Start the sandbox**:
    ```bash
+   # Interactive mode (prompts for ZIP file)
    scripts/run-sandbox.sh
+
+   # Single ZIP file (direct processing)
+   scripts/run-sandbox.sh submission.zip
+
+   # Multiple ZIP files (merged extraction)
+   scripts/run-sandbox.sh frontend.zip backend.zip
    ```
 
-2. **Provide the submission ZIP file path** when prompted:
+2. **If using interactive mode, provide the submission ZIP file path(s)** when prompted:
    ```
    Enter the path to the submission ZIP file:
    ./example-app.zip
+
+   Do you have a second ZIP file to merge? (e.g., frontend + backend)
+   Press Enter to skip, or enter the path to the second ZIP file:
+   [Press Enter to continue with single ZIP, or enter path like ./backend.zip]
    ```
-   - If file not found, you'll be prompted to try again
-   - Type 'quit' to exit at any time
+   - First ZIP is required, second ZIP is optional
+   - Press Enter to skip the second ZIP and continue with just one
+   - Both ZIPs will be extracted to the same folder if provided
+   - Type 'quit' to exit at any time during first prompt
    - Supports absolute and relative paths
 
 3. **Wait for security scanning** - The system will:
@@ -168,6 +181,25 @@ python app.py
 docker-compose up
 ```
 
+#### Multi-Component Projects (Frontend + Backend)
+When processing multiple ZIP files (e.g., separate frontend and backend archives):
+```bash
+# Process both ZIPs into a single extraction folder
+scripts/run-sandbox.sh frontend.zip backend.zip
+
+# The contents of both ZIPs will be merged into extracted/combined_[timestamp]/
+# For example:
+#   frontend.zip contains: /frontend/src, /frontend/package.json
+#   backend.zip contains: /backend/api, /backend/requirements.txt
+# Result: extracted/combined_20241212_143022/
+#         ├── frontend/
+#         │   ├── src/
+#         │   └── package.json
+#         └── backend/
+#             ├── api/
+#             └── requirements.txt
+```
+
 ## 📂 Directory Structure
 
 ```
@@ -211,7 +243,9 @@ thanx-isolated-sandbox/
 - Optional override for testing (use with extreme caution)
 
 ### 3. Extraction & Cleanup
-- ZIP extracted to `extracted/` directory
+- ZIP(s) extracted to `extracted/` directory
+- Single ZIP: extracted to `extracted/{base_name}/`
+- Multiple ZIPs: merged into `extracted/combined_{timestamp}/`
 - Nested paths (e.g., `Users/Me/Desktop/...`) are flattened
 - Project files moved to root of extraction directory
 - Clean workspace ready for review
@@ -463,12 +497,14 @@ Permission denied
 4. **Test it works**: Inside container, run `ls`, `node -v`, `ruby -v`
 
 ### Daily Usage
-1. **Get ZIP file** from candidate/submission
-2. **Run sandbox**: `scripts/run-sandbox.sh`
-3. **Enter path**: `./path/to/submission.zip`
-4. **Choose editor**: VS Code, Cursor, or terminal
-5. **Work safely**: All commands run in isolated container
-6. **Cleanup**: `scripts/cleanup.sh` when done
+1. **Get ZIP file(s)** from candidate/submission
+2. **Run sandbox**:
+   - Interactive: `scripts/run-sandbox.sh` (then enter path)
+   - Single ZIP: `scripts/run-sandbox.sh submission.zip`
+   - Multiple ZIPs: `scripts/run-sandbox.sh frontend.zip backend.zip`
+3. **Choose editor**: VS Code, Cursor, or terminal
+4. **Work safely**: All commands run in isolated container
+5. **Cleanup**: `scripts/cleanup.sh` when done
 
 ## 📝 Example Session
 

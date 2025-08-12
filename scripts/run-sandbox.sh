@@ -27,58 +27,109 @@ echo
 # Create necessary directories
 mkdir -p submissions extracted audit
 
-# Prompt for ZIP file path with retry loop
-while true; do
-    echo
-    print_message "$YELLOW" "Enter the path to the submission ZIP file:"
-    read -r zip_path
+# Handle command-line arguments or prompt for input
+if [ $# -eq 0 ]; then
+    # No arguments provided, use interactive mode
+    zip_paths=()
 
-    # Check if user wants to quit
-    if [ -z "$zip_path" ]; then
-        print_message "$YELLOW" "No path entered. Press Enter to try again or type 'quit' to exit:"
-        read -r response
-        if [ "$response" = "quit" ]; then
-            print_message "$BLUE" "Exiting..."
-            exit 0
+    # Get first ZIP file
+    while true; do
+        echo
+        print_message "$YELLOW" "Enter the path to the submission ZIP file:"
+        read -r zip_path
+
+        # Check if user wants to quit
+        if [ -z "$zip_path" ]; then
+            print_message "$YELLOW" "No path entered. Press Enter to try again or type 'quit' to exit:"
+            read -r response
+            if [ "$response" = "quit" ]; then
+                print_message "$BLUE" "Exiting..."
+                exit 0
+            fi
+            continue
         fi
-        continue
+
+        # Validate file exists
+        if [ ! -f "$zip_path" ]; then
+            print_message "$RED" "Error: File not found at $zip_path"
+            print_message "$YELLOW" "Please check the path and try again (or type 'quit' to exit)"
+            continue
+        fi
+
+        # Validate it's a ZIP file
+        if ! file "$zip_path" | grep -q "Zip archive"; then
+            print_message "$RED" "Error: File is not a valid ZIP archive"
+            print_message "$YELLOW" "Please provide a valid ZIP file (or type 'quit' to exit)"
+            continue
+        fi
+
+        # If we get here, file is valid
+        zip_paths+=("$zip_path")
+        break
+    done
+
+    # Ask if user wants to add a second ZIP file (optional)
+    echo
+    print_message "$YELLOW" "Do you have a second ZIP file to merge? (e.g., frontend + backend)"
+    print_message "$YELLOW" "Press Enter to skip, or enter the path to the second ZIP file:"
+    read -r second_zip_path
+
+    if [ -n "$second_zip_path" ]; then
+        # Validate second file if provided
+        if [ ! -f "$second_zip_path" ]; then
+            print_message "$RED" "Warning: Second file not found at $second_zip_path"
+            print_message "$YELLOW" "Proceeding with single ZIP file only"
+        elif ! file "$second_zip_path" | grep -q "Zip archive"; then
+            print_message "$RED" "Warning: Second file is not a valid ZIP archive"
+            print_message "$YELLOW" "Proceeding with single ZIP file only"
+        else
+            zip_paths+=("$second_zip_path")
+            print_message "$GREEN" "✓ Both ZIP files will be merged into the same extraction folder"
+        fi
     fi
-
-    # Validate file exists
-    if [ ! -f "$zip_path" ]; then
-        print_message "$RED" "Error: File not found at $zip_path"
-        print_message "$YELLOW" "Please check the path and try again (or type 'quit' to exit)"
-        continue
-    fi
-
-    # Validate it's a ZIP file
-    if ! file "$zip_path" | grep -q "Zip archive"; then
-        print_message "$RED" "Error: File is not a valid ZIP archive"
-        print_message "$YELLOW" "Please provide a valid ZIP file (or type 'quit' to exit)"
-        continue
-    fi
-
-    # If we get here, file is valid
-    break
-done
-
-# Check file size (max 100MB)
-MAX_SIZE=$((100 * 1024 * 1024)) # 100MB in bytes
-FILE_SIZE=$(stat -f%z "$zip_path" 2>/dev/null || stat -c%s "$zip_path" 2>/dev/null)
-if [ "$FILE_SIZE" -gt "$MAX_SIZE" ]; then
-    print_message "$RED" "Error: File size exceeds 100MB limit ($((FILE_SIZE / 1024 / 1024))MB)"
-    print_message "$YELLOW" "Large files may contain malicious payloads or cause resource exhaustion"
+elif [ $# -eq 1 ] || [ $# -eq 2 ]; then
+    # Command-line arguments provided
+    zip_paths=()
+    for arg in "$@"; do
+        if [ ! -f "$arg" ]; then
+            print_message "$RED" "Error: File not found at $arg"
+            exit 1
+        fi
+        if ! file "$arg" | grep -q "Zip archive"; then
+            print_message "$RED" "Error: File $arg is not a valid ZIP archive"
+            exit 1
+        fi
+        zip_paths+=("$arg")
+    done
+    print_message "$GREEN" "✓ Processing ${#zip_paths[@]} ZIP file(s)"
+else
+    print_message "$RED" "Error: Too many arguments. Maximum 2 ZIP files supported."
+    print_message "$YELLOW" "Usage: $0 [zip_file1] [zip_file2]"
     exit 1
 fi
 
-# Log submission for audit
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Submission: $zip_path ($((FILE_SIZE / 1024))KB)" >>audit/submissions.log
+# Check file sizes and copy submissions
+MAX_SIZE=$((100 * 1024 * 1024)) # 100MB in bytes
+submission_names=()
 
-# Copy submission to local directory
-submission_name=$(basename "$zip_path")
-cp "$zip_path" "submissions/$submission_name"
+for zip_path in "${zip_paths[@]}"; do
+    FILE_SIZE=$(stat -f%z "$zip_path" 2>/dev/null || stat -c%s "$zip_path" 2>/dev/null)
+    if [ "$FILE_SIZE" -gt "$MAX_SIZE" ]; then
+        print_message "$RED" "Error: File $zip_path exceeds 100MB limit ($((FILE_SIZE / 1024 / 1024))MB)"
+        print_message "$YELLOW" "Large files may contain malicious payloads or cause resource exhaustion"
+        exit 1
+    fi
 
-print_message "$GREEN" "✓ File copied to submissions directory"
+    # Log submission for audit
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Submission: $zip_path ($((FILE_SIZE / 1024))KB)" >>audit/submissions.log
+
+    # Copy submission to local directory
+    submission_name=$(basename "$zip_path")
+    cp "$zip_path" "submissions/$submission_name"
+    submission_names+=("$submission_name")
+done
+
+print_message "$GREEN" "✓ ${#submission_names[@]} file(s) copied to submissions directory"
 
 # Build Docker image if needed
 echo
@@ -109,10 +160,21 @@ if ! docker images | grep -q "thanx-isolated-sandbox-sandbox"; then
 fi
 
 # Build with timeout and error handling
-if ! timeout 300 docker-compose build; then
+# Use longer timeout for first-time builds (20 minutes) vs subsequent builds (5 minutes)
+if ! docker images | grep -q "thanx-isolated-sandbox-sandbox"; then
+    BUILD_TIMEOUT=1200 # 20 minutes for first build
+else
+    BUILD_TIMEOUT=300 # 5 minutes for subsequent builds
+fi
+
+if ! timeout $BUILD_TIMEOUT docker-compose build; then
     if [ $? -eq 124 ]; then
-        print_message "$RED" "Error: Docker build timed out after 5 minutes"
+        print_message "$RED" "Error: Docker build timed out after $((BUILD_TIMEOUT / 60)) minutes"
         print_message "$YELLOW" "This might indicate a network issue or Docker problem"
+        if [ $BUILD_TIMEOUT -eq 1200 ]; then
+            print_message "$YELLOW" "First-time builds can take 10-15 minutes. Try running again with:"
+            print_message "$BLUE" "  docker-compose build"
+        fi
     else
         print_message "$RED" "Error: Docker build failed"
         print_message "$YELLOW" "Please check Docker logs for more information"
@@ -120,16 +182,24 @@ if ! timeout 300 docker-compose build; then
     exit 1
 fi
 
-# Run virus scan inside Docker
+# Run virus scan inside Docker for all submissions
 echo
-print_message "$YELLOW" "Running virus scan on submission..."
-if ! docker-compose run --rm sandbox bash -c "
-    # Update virus definitions
-    freshclam 2>/dev/null || true
+print_message "$YELLOW" "Running virus scan on submission(s)..."
+scan_failed=false
+for submission_name in "${submission_names[@]}"; do
+    if ! docker-compose run --rm sandbox bash -c "
+        # Update virus definitions
+        freshclam 2>/dev/null || true
 
-    # Run ClamAV scan
-    clamscan --infected --remove=no --recursive /sandbox/submissions/$submission_name
-"; then
+        # Run ClamAV scan
+        clamscan --infected --remove=no --recursive /sandbox/submissions/$submission_name
+    "; then
+        scan_failed=true
+        break
+    fi
+done
+
+if [ "$scan_failed" = true ]; then
     # Check if the failure was due to Docker issues
     if ! timeout 5 docker info >/dev/null 2>&1; then
         print_message "$RED" "Error: Docker connection lost during scan."
@@ -153,23 +223,32 @@ fi
 
 print_message "$GREEN" "✓ Virus scan passed - submission is clean"
 
-# Extract the submission
+# Extract the submission(s)
 echo
-print_message "$YELLOW" "Extracting submission..."
+print_message "$YELLOW" "Extracting submission(s)..."
 
-# Get the base name without extension for the parent folder
-base_name=$(basename "$submission_name" .zip)
+# Determine base name for extraction folder
+if [ ${#submission_names[@]} -eq 1 ]; then
+    # Single zip - use its base name
+    base_name=$(basename "${submission_names[0]}" .zip)
+else
+    # Multiple zips - create a combined name or use timestamp
+    base_name="combined_$(date +%Y%m%d_%H%M%S)"
+fi
 
 # Clean up any existing extraction for this submission
 rm -rf "extracted/$base_name" 2>/dev/null || true
 
-# Create the extraction folder and extract directly into it
+# Create the extraction folder
 mkdir -p "extracted/$base_name"
-cd "extracted/$base_name" || exit
-unzip -q "../../submissions/$submission_name"
 
-# Return to root directory
-cd ../..
+# Extract all zip files into the same folder
+for submission_name in "${submission_names[@]}"; do
+    print_message "$BLUE" "  Extracting $submission_name..."
+    cd "extracted/$base_name" || exit
+    unzip -q -o "../../submissions/$submission_name"
+    cd ../..
+done
 
 echo 'Extraction complete'
 
@@ -216,7 +295,7 @@ if ! docker-compose run --rm sandbox bash -c "
     freshclam 2>/dev/null || true
 
     # Run recursive ClamAV scan on extracted contents
-    clamscan --infected --remove=no --recursive /sandbox/extracted
+    clamscan --infected --remove=no --recursive /sandbox/extracted/$base_name
 "; then
     # Check if the failure was due to Docker issues
     if ! timeout 5 docker info >/dev/null 2>&1; then
