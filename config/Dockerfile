@@ -129,12 +129,14 @@ RUN source ~/.asdf/asdf.sh && \
 # Install Ruby versions
 RUN source ~/.asdf/asdf.sh && \
     asdf plugin add ruby https://github.com/asdf-vm/asdf-ruby.git && \
+    export TMPDIR=/var/tmp && \
     asdf install ruby 2.7.5 && \
     asdf install ruby 2.7.7 && \
     asdf install ruby 3.1.4 && \
     asdf install ruby 3.2.0 && \
     asdf install ruby 3.2.2 && \
     asdf install ruby 3.3.0 && \
+    asdf install ruby 3.4.3 && \
     asdf install ruby latest && \
     asdf global ruby latest
 
