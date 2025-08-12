@@ -18,6 +18,8 @@ A secure Docker-based environment for reviewing and running untrusted code submi
   - **YARA**: Advanced malware pattern matching
 - **Audit Logging**: All submissions tracked in audit logs
 
+> **💡 Pro Tip**: For maximum security confidence, consider uploading the ZIP file to [VirusTotal](https://www.virustotal.com) before processing. VirusTotal scans with 70+ antivirus engines and provides comprehensive threat analysis.
+
 ## 🛠 Prerequisites
 
 ### For Using the Sandbox

@@ -26,6 +26,13 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Install additional malware detection tools that work on ARM64
+RUN apt-get update && apt-get install -y \
+    chkrootkit \
+    rkhunter \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install PostgreSQL (client and server)
 RUN apt-get update && apt-get install -y \
     postgresql-14 \
@@ -84,8 +91,6 @@ RUN apt-get update && apt-get install -y \
     tree \
     htop \
     lynis \
-    chkrootkit \
-    rkhunter \
     yara \
     shellcheck \
     python3 \

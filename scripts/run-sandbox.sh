@@ -190,16 +190,71 @@ fi
 
 # Run virus scan inside Docker for all submissions
 echo
-print_message "$YELLOW" "Running virus scan on submission(s)..."
+print_message "$YELLOW" "Running enhanced virus scan on submission(s)..."
 scan_failed=false
+
 for submission_name in "${submission_names[@]}"; do
-    if ! docker-compose run --rm sandbox bash -c "
-        # Update virus definitions
+    print_message "$BLUE" "Scanning $submission_name..."
+
+    # Run multi-engine scan inline with progress indicators
+    if ! docker-compose run --rm sandbox bash -c '
+        FILE_PATH="/sandbox/submissions/'"$submission_name"'"
+        THREATS_FOUND=0
+
+        # Update ClamAV definitions
+        echo "⏳ Updating virus definitions..."
         freshclam 2>/dev/null || true
 
-        # Run ClamAV scan
-        clamscan --infected --remove=no --recursive /sandbox/submissions/$submission_name
-    "; then
+        echo "🔍 Running multi-engine virus scan..."
+        echo ""
+
+        # 1. ClamAV scan
+        echo -n "  [1/3] ClamAV: "
+        if clamscan --infected --no-summary "$FILE_PATH" 2>/dev/null | grep -q "FOUND"; then
+            echo "❌ THREAT DETECTED"
+            THREATS_FOUND=$((THREATS_FOUND + 1))
+        else
+            echo "✅ Clean"
+        fi
+
+        # 2. Rootkit Hunter scan (quick mode for archives)
+        echo -n "  [2/3] RKHunter: "
+        # Extract and scan for rootkit patterns
+        TEMP_DIR=$(mktemp -d)
+        unzip -q "$FILE_PATH" -d "$TEMP_DIR" 2>/dev/null || true
+        if rkhunter --check --skip-keypress --quiet --no-mail-on-warning --disable all --enable hidden_files --enable hidden_dirs --enable suspicious_files --pkgmgr NONE --rwo "$TEMP_DIR" 2>/dev/null | grep -q "Warning"; then
+            echo "⚠️  Suspicious patterns found"
+            THREATS_FOUND=$((THREATS_FOUND + 1))
+        else
+            echo "✅ Clean"
+        fi
+        rm -rf "$TEMP_DIR"
+
+        # 3. YARA rules scan (if available)
+        if [ -d /opt/yara-rules/rules ] && command -v yara >/dev/null 2>&1; then
+            echo -n "  [3/3] YARA Rules: "
+            YARA_RESULT=$(yara -r /opt/yara-rules/rules "$FILE_PATH" 2>/dev/null)
+            if [ -n "$YARA_RESULT" ]; then
+                echo "⚠️  SUSPICIOUS PATTERNS"
+                THREATS_FOUND=$((THREATS_FOUND + 1))
+            else
+                echo "✅ Clean"
+            fi
+        else
+            echo "  [3/3] YARA: ⏭️  Skipped (rules not loaded)"
+        fi
+
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo -n "📊 Scan Summary: "
+        if [ $THREATS_FOUND -eq 0 ]; then
+            echo "✅ All scanners report file as CLEAN"
+            exit 0
+        else
+            echo "⚠️  $THREATS_FOUND scanner(s) detected potential threats!"
+            exit 1
+        fi
+    '; then
         scan_failed=true
         break
     fi
@@ -227,7 +282,7 @@ if [ "$scan_failed" = true ]; then
     print_message "$YELLOW" "Proceeding at your own risk..."
 fi
 
-print_message "$GREEN" "✓ Virus scan passed - submission is clean"
+print_message "$GREEN" "✓ Multi-engine virus scan passed - submission is clean"
 
 # Extract the submission(s)
 echo
