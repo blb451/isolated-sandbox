@@ -11,26 +11,31 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# Reusable spinner animation for progress indicators (same as run-sandbox.sh)
+SPINNER_FRAMES=("⣾" "⣽" "⣻" "⢿" "⡿" "⣟" "⣯" "⣷")
+
 print_message() {
     local color=$1
     local message=$2
     echo -e "${color}${message}${NC}"
 }
 
-# Spinner animation function
+# Spinner animation function using consistent frames
 show_spinner() {
     local pid=$1
     local delay=0.1
-    local spinstr='|/-\'
-    local temp
     while ps -p $pid >/dev/null 2>&1; do
-        temp=${spinstr#?}
-        printf " [%c] " "$spinstr"
-        spinstr=$temp${spinstr%"$temp"}
-        sleep $delay
-        printf "\b\b\b\b\b"
+        for frame in "${SPINNER_FRAMES[@]}"; do
+            printf " %s " "$frame"
+            sleep $delay
+            printf "\b\b\b"
+            # Check if process is still running
+            if ! ps -p $pid >/dev/null 2>&1; then
+                break
+            fi
+        done
     done
-    printf "    \b\b\b\b"
+    printf "   \b\b\b"
 }
 
 # Progress indicator with steps
@@ -76,12 +81,21 @@ read -r choice
 case $choice in
 1)
     echo
-    print_message "$YELLOW" "Removing extracted files..."
+    echo -n "  Removing extracted files"
     # Fix permissions first in case they're messed up
-    chmod -R 755 extracted 2>/dev/null
-    rm -rf extracted/*
-    rm -rf extracted/.* 2>/dev/null
-    print_message "$GREEN" "✓ Extracted files removed"
+    (chmod -R 755 extracted 2>/dev/null && rm -rf extracted/* && rm -rf extracted/.* 2>/dev/null) &
+    PID=$!
+
+    # Show spinner while removing
+    while ps -p $PID >/dev/null 2>&1; do
+        for frame in "${SPINNER_FRAMES[@]}"; do
+            printf "\r  Removing extracted files %s" "$frame"
+            sleep 0.1
+        done
+    done
+    wait $PID
+
+    echo -e "\r  ✓ Extracted files removed                    "
     ;;
 2)
     echo
@@ -91,11 +105,22 @@ case $choice in
     ;;
 3)
     echo
-    print_message "$YELLOW" "Cleaning container artifacts..."
-    docker-compose down
-    docker system prune -f
-    rm -rf audit/*.log
-    print_message "$GREEN" "✓ Container artifacts cleaned"
+    echo -n "  Cleaning container artifacts"
+
+    # Run cleanup operations in background
+    (docker-compose down 2>/dev/null && docker system prune -f >/dev/null 2>&1 && rm -rf audit/*.log) &
+    PID=$!
+
+    # Show spinner while cleaning
+    while ps -p $PID >/dev/null 2>&1; do
+        for frame in "${SPINNER_FRAMES[@]}"; do
+            printf "\r  Cleaning container artifacts %s" "$frame"
+            sleep 0.1
+        done
+    done
+    wait $PID
+
+    echo -e "\r  ✓ Container artifacts cleaned                 "
     ;;
 4)
     print_message "$RED" "⚠️  This will remove all data and reset the sandbox!"
@@ -164,11 +189,34 @@ case $choice in
     ;;
 5)
     echo
-    print_message "$YELLOW" "Removing files older than 7 days..."
-    find extracted -type f -mtime +7 -delete 2>/dev/null
-    find submissions -type f -mtime +7 -delete 2>/dev/null
-    find audit -type f -mtime +7 -delete 2>/dev/null
-    print_message "$GREEN" "✓ Old files removed"
+    echo -n "  Scanning for old files"
+
+    # Count old files first
+    OLD_COUNT=$(find extracted submissions audit -type f -mtime +7 2>/dev/null | wc -l)
+
+    if [ "$OLD_COUNT" -gt 0 ]; then
+        echo -e "\r  Found $OLD_COUNT old files (>7 days)          "
+        echo -n "  Removing old files"
+
+        # Remove old files in background
+        (find extracted -type f -mtime +7 -delete 2>/dev/null &&
+            find submissions -type f -mtime +7 -delete 2>/dev/null &&
+            find audit -type f -mtime +7 -delete 2>/dev/null) &
+        PID=$!
+
+        # Show spinner while removing
+        while ps -p $PID >/dev/null 2>&1; do
+            for frame in "${SPINNER_FRAMES[@]}"; do
+                printf "\r  Removing old files %s" "$frame"
+                sleep 0.1
+            done
+        done
+        wait $PID
+
+        echo -e "\r  ✓ Removed $OLD_COUNT old files                "
+    else
+        echo -e "\r  ✓ No old files found (>7 days)               "
+    fi
     ;;
 6)
     print_message "$GREEN" "Exiting..."
@@ -180,11 +228,36 @@ esac
 
 # Show disk usage
 echo
-print_message "$BLUE" "Current disk usage:"
-du -sh extracted 2>/dev/null | awk '{print "  Extracted: " $1}'
-du -sh submissions 2>/dev/null | awk '{print "  Submissions: " $1}'
-du -sh audit 2>/dev/null | awk '{print "  Audit logs: " $1}'
-docker system df | grep -E "Images|Containers" | awk '{print "  Docker " $1 ": " $2}'
+echo -n "  Calculating disk usage"
+
+# Run disk usage calculations in background
+(
+    echo "EXTRACTED=$(du -sh extracted 2>/dev/null | awk '{print $1}')" >/tmp/disk_usage.txt
+    echo "SUBMISSIONS=$(du -sh submissions 2>/dev/null | awk '{print $1}')" >>/tmp/disk_usage.txt
+    echo "AUDIT=$(du -sh audit 2>/dev/null | awk '{print $1}')" >>/tmp/disk_usage.txt
+    docker system df 2>/dev/null | grep -E "Images|Containers" | awk '{print "DOCKER_" $1 "=\"" $2 "\""}' >>/tmp/disk_usage.txt
+) &
+PID=$!
+
+# Show spinner while calculating
+while ps -p $PID >/dev/null 2>&1; do
+    for frame in "${SPINNER_FRAMES[@]}"; do
+        printf "\r  Calculating disk usage %s" "$frame"
+        sleep 0.1
+    done
+done
+wait $PID
+
+# Read results
+source /tmp/disk_usage.txt 2>/dev/null || true
+rm -f /tmp/disk_usage.txt
+
+echo -e "\r${BLUE}Current disk usage:${NC}                     "
+[ -n "$EXTRACTED" ] && echo "  Extracted: $EXTRACTED"
+[ -n "$SUBMISSIONS" ] && echo "  Submissions: $SUBMISSIONS"
+[ -n "$AUDIT" ] && echo "  Audit logs: $AUDIT"
+[ -n "$DOCKER_Images" ] && echo "  Docker Images: $DOCKER_Images"
+[ -n "$DOCKER_Containers" ] && echo "  Docker Containers: $DOCKER_Containers"
 
 # Exit the script
 exit 0

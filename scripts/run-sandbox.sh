@@ -10,11 +10,29 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Reusable spinner animation for progress indicators
+SPINNER_FRAMES=("⣾" "⣽" "⣻" "⢿" "⡿" "⣟" "⣯" "⣷")
+
 # Function to print colored messages
 print_message() {
     local color=$1
     local message=$2
     echo -e "${color}${message}${NC}"
+}
+
+# Function to check Docker connectivity
+check_docker() {
+    if ! timeout 5 docker info >/dev/null 2>&1; then
+        if [ $? -eq 124 ]; then
+            print_message "$RED" "Error: Docker is not responding (timed out)"
+            print_message "$YELLOW" "Docker Desktop may be starting up. Please wait and try again."
+        else
+            print_message "$RED" "Error: Docker is not running!"
+            print_message "$YELLOW" "Please start Docker Desktop and try again."
+        fi
+        return 1
+    fi
+    return 0
 }
 
 # Banner
@@ -119,7 +137,12 @@ MAX_SIZE=$((500 * 1024 * 1024)) # 500MB in bytes
 submission_names=()
 
 for zip_path in "${zip_paths[@]}"; do
-    FILE_SIZE=$(stat -f%z "$zip_path" 2>/dev/null || stat -c%s "$zip_path" 2>/dev/null)
+    # Detect OS and use appropriate stat command
+    if [[ $OSTYPE == "darwin"* ]] || [[ "$(uname)" == "Darwin" ]]; then
+        FILE_SIZE=$(stat -f%z "$zip_path")
+    else
+        FILE_SIZE=$(stat -c%s "$zip_path")
+    fi
     if [ "$FILE_SIZE" -gt "$MAX_SIZE" ]; then
         print_message "$RED" "Error: File $zip_path exceeds 500MB limit ($((FILE_SIZE / 1024 / 1024))MB)"
         print_message "$YELLOW" "Large files may contain malicious payloads or cause resource exhaustion"
@@ -142,14 +165,7 @@ echo
 print_message "$YELLOW" "Checking Docker status..."
 
 # Check if Docker daemon is running with timeout
-if ! timeout 5 docker info >/dev/null 2>&1; then
-    if [ $? -eq 124 ]; then
-        print_message "$RED" "Error: Docker is not responding (timed out)"
-        print_message "$YELLOW" "Docker Desktop may be starting up. Please wait and try again."
-    else
-        print_message "$RED" "Error: Docker is not running!"
-        print_message "$YELLOW" "Please start Docker Desktop and try again."
-    fi
+if ! check_docker; then
     exit 1
 fi
 
@@ -201,45 +217,90 @@ for submission_name in "${submission_names[@]}"; do
         FILE_PATH="/sandbox/submissions/'"$submission_name"'"
         THREATS_FOUND=0
 
-        # Update ClamAV definitions
-        echo "⏳ Updating virus definitions..."
-        freshclam 2>/dev/null || true
+        # Define spinner frames inside container
+        SPINNER_FRAMES=("⣾" "⣽" "⣻" "⢿" "⡿" "⣟" "⣯" "⣷")
+
+        # Update ClamAV definitions only on first submission
+        if [ "'"$submission_name"'" = "'"${submission_names[0]}"'" ]; then
+            echo "⏳ Updating virus definitions..."
+            freshclam 2>/dev/null || true
+        fi
 
         echo "🔍 Running multi-engine virus scan..."
         echo ""
 
-        # 1. ClamAV scan
-        echo -n "  [1/3] ClamAV: "
-        if clamscan --infected --no-summary "$FILE_PATH" 2>/dev/null | grep -q "FOUND"; then
-            echo "❌ THREAT DETECTED"
+        # 1. ClamAV scan with spinner
+        echo -n "  [1/3] ClamAV: Scanning"
+        (clamscan --infected --no-summary "$FILE_PATH" > /tmp/clam_result 2>&1) &
+        SCAN_PID=$!
+
+        # Show spinner while scanning
+        while kill -0 $SCAN_PID 2>/dev/null; do
+            for s in "${SPINNER_FRAMES[@]}"; do
+                echo -ne "\r  [1/3] ClamAV: Scanning $s"
+                sleep 0.1
+            done
+        done
+        wait $SCAN_PID
+
+        if grep -q "FOUND" /tmp/clam_result 2>/dev/null; then
+            echo -e "\r  [1/3] ClamAV: ❌ THREAT DETECTED    "
             THREATS_FOUND=$((THREATS_FOUND + 1))
         else
-            echo "✅ Clean"
+            echo -e "\r  [1/3] ClamAV: ✅ Clean              "
         fi
+        rm -f /tmp/clam_result
 
-        # 2. Rootkit Hunter scan (quick mode for archives)
-        echo -n "  [2/3] RKHunter: "
-        # Extract and scan for rootkit patterns
+        # 2. Rootkit Hunter scan (quick mode for archives) with progress
+        echo -n "  [2/3] RKHunter: Extracting"
         TEMP_DIR=$(mktemp -d)
         unzip -q "$FILE_PATH" -d "$TEMP_DIR" 2>/dev/null || true
-        if rkhunter --check --skip-keypress --quiet --no-mail-on-warning --disable all --enable hidden_files --enable hidden_dirs --enable suspicious_files --pkgmgr NONE --rwo "$TEMP_DIR" 2>/dev/null | grep -q "Warning"; then
-            echo "⚠️  Suspicious patterns found"
+
+        echo -ne "\r  [2/3] RKHunter: Scanning  "
+        (rkhunter --check --skip-keypress --quiet --no-mail-on-warning --disable all --enable hidden_files --enable hidden_dirs --enable suspicious_files --pkgmgr NONE --rwo "$TEMP_DIR" > /tmp/rk_result 2>&1) &
+        SCAN_PID=$!
+
+        # Show spinner while scanning
+        while kill -0 $SCAN_PID 2>/dev/null; do
+            for s in "${SPINNER_FRAMES[@]}"; do
+                echo -ne "\r  [2/3] RKHunter: Scanning $s"
+                sleep 0.1
+            done
+        done
+        wait $SCAN_PID
+
+        if grep -q "Warning" /tmp/rk_result 2>/dev/null; then
+            echo -e "\r  [2/3] RKHunter: ⚠️  Suspicious patterns found    "
             THREATS_FOUND=$((THREATS_FOUND + 1))
         else
-            echo "✅ Clean"
+            echo -e "\r  [2/3] RKHunter: ✅ Clean                        "
         fi
         rm -rf "$TEMP_DIR"
+        rm -f /tmp/rk_result
 
-        # 3. YARA rules scan (if available)
+        # 3. YARA rules scan (if available) with progress
         if [ -d /opt/yara-rules/rules ] && command -v yara >/dev/null 2>&1; then
-            echo -n "  [3/3] YARA Rules: "
-            YARA_RESULT=$(yara -r /opt/yara-rules/rules "$FILE_PATH" 2>/dev/null)
+            echo -n "  [3/3] YARA Rules: Scanning"
+            (yara -r /opt/yara-rules/rules "$FILE_PATH" > /tmp/yara_result 2>&1) &
+            SCAN_PID=$!
+
+            # Show spinner while scanning
+            while kill -0 $SCAN_PID 2>/dev/null; do
+                for s in "${SPINNER_FRAMES[@]}"; do
+                    echo -ne "\r  [3/3] YARA Rules: Scanning $s"
+                    sleep 0.1
+                done
+            done
+            wait $SCAN_PID
+
+            YARA_RESULT=$(cat /tmp/yara_result 2>/dev/null)
             if [ -n "$YARA_RESULT" ]; then
-                echo "⚠️  SUSPICIOUS PATTERNS"
+                echo -e "\r  [3/3] YARA Rules: ⚠️  SUSPICIOUS PATTERNS    "
                 THREATS_FOUND=$((THREATS_FOUND + 1))
             else
-                echo "✅ Clean"
+                echo -e "\r  [3/3] YARA Rules: ✅ Clean                  "
             fi
+            rm -f /tmp/yara_result
         else
             echo "  [3/3] YARA: ⏭️  Skipped (rules not loaded)"
         fi
@@ -262,7 +323,7 @@ done
 
 if [ "$scan_failed" = true ]; then
     # Check if the failure was due to Docker issues
-    if ! timeout 5 docker info >/dev/null 2>&1; then
+    if ! check_docker; then
         print_message "$RED" "Error: Docker connection lost during scan."
         print_message "$RED" "The process cannot continue."
     else
@@ -297,10 +358,8 @@ else
     base_name="combined_$(date +%Y%m%d_%H%M%S)"
 fi
 
-# Clean up any existing extraction for this submission
+# Clean up any existing extraction and create fresh folder
 rm -rf "extracted/$base_name" 2>/dev/null || true
-
-# Create the extraction folder
 mkdir -p "extracted/$base_name"
 
 # Extract all zip files into the same folder
@@ -314,12 +373,12 @@ done
 echo 'Extraction complete'
 
 # Store the extracted project path for later use
-EXTRACTED_PROJECT_PATH="/sandbox/extracted/"$base_name""
+EXTRACTED_PROJECT_PATH="/sandbox/extracted/$base_name"
 
 print_message "$GREEN" "✓ Submission extracted successfully"
 
 # Add a simple warning file without breaking permissions
-cat >"extracted/"$base_name"/README_SECURITY_WARNING.txt" <<'EOF'
+cat >"extracted/$base_name/README_SECURITY_WARNING.txt" <<'EOF'
 ⚠️  SECURITY WARNING ⚠️
 
 This directory contains UNTRUSTED code from a submission.
@@ -345,21 +404,51 @@ echo
 print_message "$YELLOW" "Running deep virus scan on extracted files..."
 
 # First check if Docker is running
-if ! timeout 5 docker info >/dev/null 2>&1; then
-    print_message "$RED" "Error: Cannot connect to Docker daemon."
-    print_message "$RED" "Please ensure Docker is running and try again."
+if ! check_docker; then
     exit 1
 fi
 
-if ! docker-compose run --rm sandbox bash -c "
-    # Update virus definitions
-    freshclam 2>/dev/null || true
+echo -n "  ⏳ Starting deep scan"
+if ! docker-compose run --rm sandbox bash -c '
+    # Define spinner frames inside container
+    SPINNER_FRAMES=("⣾" "⣽" "⣻" "⢿" "⡿" "⣟" "⣯" "⣷")
 
-    # Run recursive ClamAV scan on extracted contents
-    clamscan --infected --remove=no --recursive /sandbox/extracted/$base_name
-"; then
+    # Run recursive ClamAV scan on extracted contents with progress
+    echo -e "\r  🔍 Deep scanning extracted files..."
+
+    # Count files first for progress indication
+    FILE_COUNT=$(find /sandbox/extracted/'"$base_name"' -type f | wc -l)
+    echo "  📁 Found $FILE_COUNT files to scan"
+
+    # Run scan with verbose output for progress
+    echo -n "  ⚡ Scanning"
+    (clamscan --infected --remove=no --recursive /sandbox/extracted/'"$base_name"' > /tmp/deep_scan 2>&1) &
+    SCAN_PID=$!
+
+    # Show progress with spinner
+    while kill -0 $SCAN_PID 2>/dev/null; do
+        for s in "${SPINNER_FRAMES[@]}"; do
+            echo -ne "\r  ⚡ Scanning files $s"
+            sleep 0.1
+        done
+    done
+    wait $SCAN_PID
+    SCAN_EXIT=$?
+
+    # Check results
+    if [ $SCAN_EXIT -eq 0 ]; then
+        echo -e "\r  ✅ Deep scan complete - no threats found        "
+        exit 0
+    else
+        if grep -q "FOUND" /tmp/deep_scan 2>/dev/null; then
+            echo -e "\r  ❌ Deep scan found infected files!             "
+            grep "FOUND" /tmp/deep_scan | head -5
+        fi
+        exit 1
+    fi
+'; then
     # Check if the failure was due to Docker issues
-    if ! timeout 5 docker info >/dev/null 2>&1; then
+    if ! check_docker; then
         print_message "$RED" "Error: Docker connection lost during scan."
         print_message "$RED" "The process cannot continue."
     else
@@ -398,6 +487,9 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ ]]; then
     docker-compose run --rm sandbox bash -c "
         cd $EXTRACTED_PROJECT_PATH
 
+        # Define spinner frames inside container
+        SPINNER_FRAMES=('⣾' '⣽' '⣻' '⢿' '⡿' '⣟' '⣯' '⣷')
+
         # Create temp directory for reports
         TEMP_DIR=/tmp/security_analysis_$$
         mkdir -p \$TEMP_DIR
@@ -407,81 +499,136 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ ]]; then
 
         # Python security analysis
         if find . -name '*.py' -type f | head -1 > /dev/null 2>&1; then
-            echo -n '  Analyzing Python code with Bandit... '
-            bandit -r . -f txt > \$TEMP_DIR/bandit.txt 2>&1
+            echo -n '  Analyzing Python code with Bandit'
+            (bandit -r . -f txt > \$TEMP_DIR/bandit.txt 2>&1) &
+            SCAN_PID=\$!
+
+            # Show spinner while analyzing
+            while kill -0 \$SCAN_PID 2>/dev/null; do
+                for s in \"\${SPINNER_FRAMES[@]}\"; do
+                    echo -ne \"\\r  Analyzing Python code with Bandit \$s\"
+                    sleep 0.1
+                done
+            done
+            wait \$SCAN_PID
+
             BANDIT_LINES=\$(wc -l < \$TEMP_DIR/bandit.txt)
             if [ \$BANDIT_LINES -gt 50 ]; then
-                echo \"✓ (found \$BANDIT_LINES lines of output - saved to report)\"
+                echo -e \"\\r  Analyzing Python code with Bandit... ✓ (found \$BANDIT_LINES lines - saved to report)\"
                 head -20 \$TEMP_DIR/bandit.txt
                 echo
                 echo \"    ... output truncated. Full report saved to: audit/security_reports/\"
             else
-                echo '✓'
+                echo -e \"\\r  Analyzing Python code with Bandit... ✓                      \"
                 cat \$TEMP_DIR/bandit.txt
             fi
             echo
 
-            echo -n '  Checking Python dependencies with Safety... '
             if [ -f requirements.txt ]; then
-                safety check -r requirements.txt > \$TEMP_DIR/safety.txt 2>&1
+                echo -n '  Checking Python dependencies with Safety'
+                (safety check -r requirements.txt > \$TEMP_DIR/safety.txt 2>&1) &
+                SCAN_PID=\$!
+
+                # Show spinner while checking
+                while kill -0 \$SCAN_PID 2>/dev/null; do
+                    for s in \"\${SPINNER_FRAMES[@]}\"; do
+                        echo -ne \"\\r  Checking Python dependencies with Safety \$s\"
+                        sleep 0.1
+                    done
+                done
+                wait \$SCAN_PID
+
                 SAFETY_LINES=\$(wc -l < \$TEMP_DIR/safety.txt)
                 if [ \$SAFETY_LINES -gt 30 ]; then
-                    echo \"✓ (found \$SAFETY_LINES lines of output - saved to report)\"
+                    echo -e \"\\r  Checking Python dependencies with Safety... ✓ (found \$SAFETY_LINES lines - saved)\"
                     head -10 \$TEMP_DIR/safety.txt
                     echo \"    ... output truncated. Full report saved to: audit/security_reports/\"
                 else
-                    echo '✓'
+                    echo -e \"\\r  Checking Python dependencies with Safety... ✓                      \"
                     cat \$TEMP_DIR/safety.txt
                 fi
             else
-                echo 'No requirements.txt found'
+                echo '  No requirements.txt found - skipping dependency check'
             fi
             echo
         fi
 
         # Shell script security
         if find . -name '*.sh' -type f | head -1 > /dev/null 2>&1; then
-            echo -n '  Analyzing shell scripts with ShellCheck... '
-            find . -name '*.sh' -type f -exec shellcheck {} \; > \$TEMP_DIR/shellcheck.txt 2>&1
+            echo -n '  Analyzing shell scripts with ShellCheck'
+            (find . -name '*.sh' -type f -exec shellcheck {} \; > \$TEMP_DIR/shellcheck.txt 2>&1) &
+            SCAN_PID=\$!
+
+            # Show spinner while analyzing
+            while kill -0 \$SCAN_PID 2>/dev/null; do
+                for s in \"\${SPINNER_FRAMES[@]}\"; do
+                    echo -ne \"\\r  Analyzing shell scripts with ShellCheck \$s\"
+                    sleep 0.1
+                done
+            done
+            wait \$SCAN_PID
+
             SHELL_LINES=\$(wc -l < \$TEMP_DIR/shellcheck.txt)
             if [ \$SHELL_LINES -gt 50 ]; then
-                echo \"✓ (found \$SHELL_LINES lines of output - saved to report)\"
+                echo -e \"\\r  Analyzing shell scripts with ShellCheck... ✓ (found \$SHELL_LINES lines - saved)\"
                 head -20 \$TEMP_DIR/shellcheck.txt
                 echo \"    ... output truncated. Full report saved to: audit/security_reports/\"
             else
-                echo '✓'
+                echo -e \"\\r  Analyzing shell scripts with ShellCheck... ✓                      \"
                 cat \$TEMP_DIR/shellcheck.txt
             fi
             echo
         fi
 
         # General code security with Semgrep
-        echo -n '  Running Semgrep security patterns... '
-        semgrep --config=auto --quiet . > \$TEMP_DIR/semgrep.txt 2>&1
+        echo -n '  Running Semgrep security patterns'
+        (semgrep --config=auto --quiet . > \$TEMP_DIR/semgrep.txt 2>&1) &
+        SCAN_PID=\$!
+
+        # Show spinner while scanning
+        while kill -0 \$SCAN_PID 2>/dev/null; do
+            for s in \"\${SPINNER_FRAMES[@]}\"; do
+                echo -ne \"\\r  Running Semgrep security patterns \$s\"
+                sleep 0.1
+            done
+        done
+        wait \$SCAN_PID
+
         SEMGREP_LINES=\$(wc -l < \$TEMP_DIR/semgrep.txt)
         if [ \$SEMGREP_LINES -gt 50 ]; then
-            echo \"✓ (found \$SEMGREP_LINES lines of output - saved to report)\"
+            echo -e \"\\r  Running Semgrep security patterns... ✓ (found \$SEMGREP_LINES lines - saved)      \"
             head -20 \$TEMP_DIR/semgrep.txt
             echo \"    ... output truncated. Full report saved to: audit/security_reports/\"
         else
-            echo '✓'
+            echo -e \"\\r  Running Semgrep security patterns... ✓                      \"
             cat \$TEMP_DIR/semgrep.txt
         fi
         echo
 
         # YARA malware detection
-        echo -n '  Scanning for malware patterns with YARA... '
         if [ -d /opt/yara-rules/rules ]; then
-            find . -type f \( -name '*.exe' -o -name '*.dll' -o -name '*.jar' -o -name '*.zip' -o -name '*.tar*' \) -exec yara -r /opt/yara-rules/rules {} \; > \$TEMP_DIR/yara.txt 2>&1
+            echo -n '  Scanning for malware patterns with YARA'
+            (find . -type f \( -name '*.exe' -o -name '*.dll' -o -name '*.jar' -o -name '*.zip' -o -name '*.tar*' \) -exec yara -r /opt/yara-rules/rules {} \; > \$TEMP_DIR/yara.txt 2>&1) &
+            SCAN_PID=\$!
+
+            # Show spinner while scanning
+            while kill -0 \$SCAN_PID 2>/dev/null; do
+                for s in \"\${SPINNER_FRAMES[@]}\"; do
+                    echo -ne \"\\r  Scanning for malware patterns with YARA \$s\"
+                    sleep 0.1
+                done
+            done
+            wait \$SCAN_PID
+
             YARA_LINES=\$(wc -l < \$TEMP_DIR/yara.txt)
             if [ \$YARA_LINES -gt 0 ]; then
-                echo \"⚠️  SUSPICIOUS FILES DETECTED\"
+                echo -e \"\\r  Scanning for malware patterns with YARA... ⚠️  SUSPICIOUS FILES DETECTED\"
                 cat \$TEMP_DIR/yara.txt
             else
-                echo '✓ No malware patterns detected'
+                echo -e \"\\r  Scanning for malware patterns with YARA... ✓ No malware patterns detected\"
             fi
         else
-            echo 'YARA rules not available'
+            echo '  YARA rules not available - skipping malware pattern scan'
         fi
         echo
 
@@ -515,7 +662,7 @@ fi
 # Show extracted contents
 echo
 print_message "$BLUE" "Extracted contents:"
-find "extracted/"$base_name"" -maxdepth 2 -type f | head -10
+find "extracted/$base_name" -maxdepth 2 -type f | head -10
 
 # Ask user what to do next
 while true; do
@@ -540,13 +687,13 @@ while true; do
         print_message "$YELLOW" "Opening VS Code with the extracted submission..."
 
         # Create VS Code workspace configuration
-        mkdir -p "extracted/"$base_name"/.vscode" 2>/dev/null
+        mkdir -p "extracted/$base_name/.vscode" 2>/dev/null
 
         # Get absolute path to the sandbox directory (parent of scripts)
         SANDBOX_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
         # Create settings to configure integrated terminal with proper Docker command
-        cat >extracted/"$base_name"/.vscode/settings.json <<EOF
+        cat >"extracted/$base_name/.vscode/settings.json" <<EOF
 {
     "terminal.integrated.defaultProfile.osx": "Docker Sandbox",
     "terminal.integrated.defaultProfile.linux": "Docker Sandbox",
@@ -570,7 +717,7 @@ while true; do
 EOF
 
         # Open VS Code and trigger the terminal task
-        if code "./extracted/"$base_name"" --new-window 2>/dev/null; then
+        if code "./extracted/$base_name" --new-window 2>/dev/null; then
             sleep 2
             # Use AppleScript to open integrated terminal in VS Code
             osascript -e 'tell application "Visual Studio Code" to activate' 2>/dev/null
@@ -594,13 +741,13 @@ EOF
         print_message "$YELLOW" "Opening Cursor with the extracted submission..."
 
         # Create Cursor workspace configuration
-        mkdir -p extracted/"$base_name"/.vscode 2>/dev/null # Cursor also uses .vscode
+        mkdir -p "extracted/$base_name/.vscode" 2>/dev/null # Cursor also uses .vscode
 
         # Get absolute path to the sandbox directory (parent of scripts)
         SANDBOX_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
         # Create settings to configure integrated terminal with proper Docker command
-        cat >extracted/"$base_name"/.vscode/settings.json <<EOF
+        cat >"extracted/$base_name/.vscode/settings.json" <<EOF
 {
     "terminal.integrated.defaultProfile.osx": "Docker Sandbox",
     "terminal.integrated.defaultProfile.linux": "Docker Sandbox",
@@ -624,7 +771,7 @@ EOF
 EOF
 
         # Open Cursor and trigger the terminal task
-        if cursor "./extracted/"$base_name"" --new-window 2>/dev/null; then
+        if cursor "./extracted/$base_name" --new-window 2>/dev/null; then
             sleep 2
             # Use AppleScript to open integrated terminal in Cursor
             osascript -e 'tell application "Cursor" to activate' 2>/dev/null
