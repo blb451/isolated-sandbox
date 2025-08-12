@@ -115,13 +115,13 @@ else
 fi
 
 # Check file sizes and copy submissions
-MAX_SIZE=$((100 * 1024 * 1024)) # 100MB in bytes
+MAX_SIZE=$((500 * 1024 * 1024)) # 500MB in bytes
 submission_names=()
 
 for zip_path in "${zip_paths[@]}"; do
     FILE_SIZE=$(stat -f%z "$zip_path" 2>/dev/null || stat -c%s "$zip_path" 2>/dev/null)
     if [ "$FILE_SIZE" -gt "$MAX_SIZE" ]; then
-        print_message "$RED" "Error: File $zip_path exceeds 100MB limit ($((FILE_SIZE / 1024 / 1024))MB)"
+        print_message "$RED" "Error: File $zip_path exceeds 500MB limit ($((FILE_SIZE / 1024 / 1024))MB)"
         print_message "$YELLOW" "Large files may contain malicious payloads or cause resource exhaustion"
         exit 1
     fi
