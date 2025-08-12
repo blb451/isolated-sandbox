@@ -49,6 +49,9 @@ if [ $# -eq 0 ]; then
             continue
         fi
 
+        # Expand tilde and environment variables in the path
+        zip_path=$(eval echo "$zip_path")
+
         # Validate file exists
         if [ ! -f "$zip_path" ]; then
             print_message "$RED" "Error: File not found at $zip_path"
@@ -75,6 +78,9 @@ if [ $# -eq 0 ]; then
     read -r second_zip_path
 
     if [ -n "$second_zip_path" ]; then
+        # Expand tilde and environment variables in the second path
+        second_zip_path=$(eval echo "$second_zip_path")
+
         # Validate second file if provided
         if [ ! -f "$second_zip_path" ]; then
             print_message "$RED" "Warning: Second file not found at $second_zip_path"
