@@ -171,24 +171,48 @@ fi
 
 print_message "$GREEN" "✓ Docker is running"
 echo
+
+# Build with timeout and error handling
 print_message "$YELLOW" "Building/updating Docker environment..."
 
-# Check if this is the first build
+# Check if this is a first build or if Dockerfile has been modified
+IS_FIRST_BUILD=0
 if ! docker images | grep -q "thanx-isolated-sandbox-sandbox"; then
+    IS_FIRST_BUILD=1
+fi
+
+# Check for Dockerfile modifications
+DOCKERFILE_CHANGED=0
+if [ "$(git diff --name-only config/Dockerfile 2>/dev/null | wc -l)" -gt 0 ] ||
+    [ "$(git status --porcelain config/Dockerfile 2>/dev/null | wc -l)" -gt 0 ] ||
+    [ "$(git diff --name-only HEAD~1 HEAD config/Dockerfile 2>/dev/null | wc -l)" -gt 0 ]; then
+    DOCKERFILE_CHANGED=1
+fi
+
+# Determine build timeout and show appropriate message
+if [ "$IS_FIRST_BUILD" -eq 1 ]; then
+    BUILD_TIMEOUT=1200 # 20 minutes for first build
     print_message "$BLUE" "⏳ First-time build detected. This will take a while..."
     print_message "$BLUE" "   Installing multiple language versions and databases."
     print_message "$BLUE" "   Future builds will be much faster due to caching."
     echo
-fi
-
-# Build with timeout and error handling
-# Use longer timeout for first-time builds (20 minutes) vs subsequent builds (5 minutes)
-if ! docker images | grep -q "thanx-isolated-sandbox-sandbox"; then
-    BUILD_TIMEOUT=1200 # 20 minutes for first build
+elif [ "$DOCKERFILE_CHANGED" -eq 1 ]; then
+    BUILD_TIMEOUT=1200 # 20 minutes for Dockerfile changes
+    print_message "$BLUE" "⏳ Dockerfile changes detected. Rebuilding affected layers..."
+    print_message "$BLUE" "   This may take a while depending on what changed."
+    print_message "$BLUE" "   Future builds will use cached layers."
+    echo
 else
-    BUILD_TIMEOUT=300 # 5 minutes for subsequent builds
+    # Quick check: if Ruby layer is missing, we still need extended timeout
+    if ! docker images -q thanx-isolated-sandbox-sandbox 2>/dev/null | xargs -I {} docker history {} 2>/dev/null | grep -q "asdf install ruby"; then
+        BUILD_TIMEOUT=1200 # 20 minutes for rebuilding language layers
+        print_message "$BLUE" "⏳ Rebuilding language layers. This will take a while..."
+        print_message "$BLUE" "   Installing Ruby, Node.js, and Python versions."
+        echo
+    else
+        BUILD_TIMEOUT=300 # 5 minutes for regular cached builds
+    fi
 fi
-
 if ! timeout $BUILD_TIMEOUT docker-compose build; then
     if [ $? -eq 124 ]; then
         print_message "$RED" "Error: Docker build timed out after $((BUILD_TIMEOUT / 60)) minutes"
