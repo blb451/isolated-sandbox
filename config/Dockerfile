@@ -324,6 +324,27 @@ echo "List all available: asdf list all <language>"
 EOF
 RUN chmod +x /usr/local/bin/versions
 
+# Create terminal connection helper script
+RUN cat > /usr/local/bin/terminal <<'EOF'
+#!/bin/bash
+echo ""
+echo "================================================"
+echo "🖥️  Open Another Terminal in This Container"
+echo "================================================"
+echo ""
+echo "To connect another terminal to this container, run:"
+echo ""
+echo "  docker exec -it $(hostname) bash"
+echo ""
+echo "Container ID: $(hostname)"
+echo ""
+echo "This allows you to have multiple terminal windows"
+echo "working in the same isolated environment."
+echo ""
+echo "================================================"
+EOF
+RUN chmod +x /usr/local/bin/terminal
+
 # Create dev server helper script (simplified)
 RUN cat > /usr/local/bin/serve <<'EOF'
 #!/bin/bash
@@ -379,13 +400,11 @@ RUN echo 'source ~/.asdf/asdf.sh' >> ~/.bashrc && \
     echo 'echo "  serve     - Show dev server commands reference"' >> ~/.bashrc && \
     echo 'echo "  versions  - Show available language versions"' >> ~/.bashrc && \
     echo 'echo "  db        - Manage databases (postgres, mysql, redis)"' >> ~/.bashrc && \
+    echo 'echo "  terminal  - Show how to open another terminal here"' >> ~/.bashrc && \
     echo 'echo ""' >> ~/.bashrc && \
     echo 'echo "Examples:"' >> ~/.bashrc && \
     echo 'echo "  asdf set ruby 3.2.2       # Switch Ruby version"' >> ~/.bashrc && \
     echo 'echo "  db start postgres         # Start PostgreSQL"' >> ~/.bashrc && \
-    echo 'echo ""' >> ~/.bashrc && \
-    echo 'echo "To open another terminal in this container:"' >> ~/.bashrc && \
-    echo 'echo "  docker exec -it $(hostname) bash"' >> ~/.bashrc && \
     echo 'echo ""' >> ~/.bashrc && \
     echo 'echo "================================================"' >> ~/.bashrc && \
     echo 'echo ""' >> ~/.bashrc
