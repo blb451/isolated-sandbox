@@ -799,7 +799,7 @@ while true; do
     print_message "$YELLOW" "  docker-compose run --rm -w "$EXTRACTED_PROJECT_PATH" sandbox bash"
     echo
     print_message "$YELLOW" "How would you like to work with the submission?"
-    print_message "$YELLOW" "(Note: Options 1-2 are beta and may not work as expected)"
+    print_message "$YELLOW" "(Note: Editor functionality is beta and may not work as expected)"
     echo "1) Open in VS Code (with Docker extension)"
     echo "2) Open in Cursor (with Docker extension)"
     echo "3) Use Vim in terminal"
