@@ -1,0 +1,150 @@
+# Semgrep rules configuration for detecting potentially malicious code
+# This config focuses ONLY on patterns that could harm the host machine,
+# not general security vulnerabilities or code quality issues.
+
+rules:
+  # Detect command execution attempts
+  - id: dangerous-command-execution
+    patterns:
+      - pattern-either:
+          # Python command execution
+          - pattern: os.system(...)
+          - pattern: subprocess.call(...)
+          - pattern: subprocess.run(...)
+          - pattern: subprocess.Popen(...)
+          - pattern: eval(...)
+          - pattern: exec(...)
+          - pattern: __import__("os").system(...)
+          # Ruby command execution
+          - pattern: system(...)
+          - pattern: exec(...)
+          - pattern: spawn(...)
+          - pattern: "`...`"
+          - pattern: "%x(...)"
+          # JavaScript/Node command execution
+          - pattern: require("child_process").exec(...)
+          - pattern: require("child_process").spawn(...)
+          - pattern: require("child_process").execSync(...)
+          - pattern: eval(...)
+    message: "Potential command execution that could harm the host system"
+    languages: [python, ruby, javascript, typescript]
+    severity: WARNING
+
+  # Detect file system operations that could be destructive
+  - id: dangerous-file-operations
+    patterns:
+      - pattern-either:
+          # Attempts to delete files
+          - pattern: os.remove("/...")
+          - pattern: shutil.rmtree("/...")
+          - pattern: fs.unlinkSync("/...")
+          - pattern: fs.rmSync("/...")
+          - pattern: FileUtils.rm_rf("/...")
+          # Attempts to write to system directories
+          - pattern: open("/etc/...", "w")
+          - pattern: open("/usr/...", "w")
+          - pattern: open("/bin/...", "w")
+          - pattern: open("/System/...", "w")
+          - pattern: fs.writeFileSync("/etc/...")
+          - pattern: fs.writeFileSync("/usr/...")
+    message: "Potential destructive file operation on system directories"
+    languages: [python, ruby, javascript, typescript]
+    severity: ERROR
+
+  # Detect network backdoors and reverse shells
+  - id: potential-backdoor
+    patterns:
+      - pattern-either:
+          # Python reverse shell patterns
+          - pattern: socket.socket(...).connect(...)
+          - pattern: os.dup2(...)
+          # Common reverse shell one-liners
+          - pattern-regex: 'socket.*connect.*exec.*sh'
+          - pattern-regex: 'nc\s+-e\s+/bin/(bash|sh)'
+          - pattern-regex: 'bash\s+-i\s+>&\s+/dev/tcp'
+    message: "Potential backdoor or reverse shell code"
+    languages: [python, ruby, javascript, bash]
+    severity: ERROR
+
+  # Detect cryptocurrency mining
+  - id: crypto-mining
+    patterns:
+      - pattern-either:
+          - pattern-regex: '(xmrig|minerd|minergate|nicehash)'
+          - pattern-regex: 'stratum\+tcp://'
+          - pattern-regex: '(monero|bitcoin|ethereum).*wallet'
+    message: "Potential cryptocurrency mining code"
+    languages: [python, ruby, javascript, bash]
+    severity: WARNING
+
+  # Detect environment variable theft
+  - id: credential-theft
+    patterns:
+      - pattern-either:
+          # Attempts to read AWS credentials
+          - pattern: os.environ["AWS_SECRET_ACCESS_KEY"]
+          - pattern: process.env.AWS_SECRET_ACCESS_KEY
+          # Attempts to read SSH keys
+          - pattern: open("~/.ssh/id_rsa")
+          - pattern: fs.readFileSync(".../.ssh/id_rsa")
+          # Attempts to send environment variables externally
+          - pattern: requests.post(..., data=os.environ)
+          - pattern: fetch(..., {body: JSON.stringify(process.env)})
+    message: "Potential credential or sensitive data theft"
+    languages: [python, javascript, typescript, ruby]
+    severity: ERROR
+
+  # Detect fork bombs and resource exhaustion
+  - id: fork-bomb
+    patterns:
+      - pattern-either:
+          - pattern-regex: ':\(\)\{:\|:&\};:'
+          - pattern: while True: os.fork()
+          - pattern: "for(;;)fork();"
+    message: "Potential fork bomb or resource exhaustion attack"
+    languages: [python, bash, c, javascript]
+    severity: ERROR
+
+  # Detect attempts to disable security software
+  - id: disable-security
+    patterns:
+      - pattern-either:
+          - pattern-regex: 'systemctl stop (firewalld|iptables|apparmor|selinux)'
+          - pattern-regex: 'service (iptables|firewall|defender) stop'
+          - pattern-regex: 'kill.*antivirus'
+          - pattern-regex: 'disable.*defender'
+    message: "Attempt to disable security software"
+    languages: [bash, python, ruby]
+    severity: ERROR
+
+  # Detect suspicious downloads and droppers
+  - id: suspicious-download
+    patterns:
+      - pattern-either:
+          # Downloading and executing files
+          - pattern: |
+              $X = requests.get(...)
+              ...
+              exec($X...)
+          - pattern: |
+              curl ... | sh
+          - pattern: |
+              wget ... -O - | bash
+          - pattern: urllib.urlretrieve(..., "/tmp/...")
+    message: "Suspicious download and potential code execution"
+    languages: [python, bash, ruby, javascript]
+    severity: WARNING
+
+  # Detect ransomware patterns
+  - id: ransomware-patterns
+    patterns:
+      - pattern-either:
+          # File encryption patterns
+          - pattern: Crypto.Cipher.AES.new(...)
+          - pattern-regex: '\.encrypted|\.locked|\.crypto'
+          # Ransom note creation
+          - pattern-regex: 'YOUR FILES HAVE BEEN ENCRYPTED'
+          - pattern-regex: 'pay.*bitcoin.*decrypt'
+    message: "Potential ransomware behavior patterns"
+    languages: [python, javascript, ruby]
+    severity: ERROR

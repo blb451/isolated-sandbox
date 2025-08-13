@@ -702,13 +702,11 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ || $run_analysis == "yes" ]]; 
             echo
         fi
 
-        # General code security with Semgrep
-        # Note: Semgrep is a static code analysis tool that checks for security vulnerabilities,
-        # but it would also likely catch any malicious code patterns that could harm the machine
-        # of the person running the code (e.g., backdoors, suspicious network calls, etc.)
-        # TODO: Tune Semgrep rules to reduce false positives while maintaining detection of actual threats
-        echo -n '  Running Semgrep security patterns'
-        (semgrep --config=auto --quiet . > \$TEMP_DIR/semgrep.txt 2>&1) &
+        # Malicious code detection with Semgrep
+        # Uses custom rules to detect only code that could harm the host machine
+        # (command execution, backdoors, ransomware, etc.) - not general security issues
+        echo -n '  Scanning for malicious code patterns'
+        (PYTHONWARNINGS="ignore::UserWarning" semgrep --config=/sandbox/config/semgrep-malicious-only.yml --quiet . > \$TEMP_DIR/semgrep.txt 2>&1) &
         SCAN_PID=\$!
 
         # Show spinner while scanning
@@ -722,11 +720,11 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ || $run_analysis == "yes" ]]; 
 
         SEMGREP_LINES=\$(wc -l < \$TEMP_DIR/semgrep.txt)
         if [ \$SEMGREP_LINES -gt 50 ]; then
-            echo -e \"\\r  Running Semgrep security patterns... ✓ (found \$SEMGREP_LINES lines - saved)      \"
+            echo -e \"\\r  Scanning for malicious code patterns... ✓ (found \$SEMGREP_LINES lines - saved)      \"
             head -20 \$TEMP_DIR/semgrep.txt
             echo \"    ... output truncated. Full report saved to: audit/security_reports/\"
         else
-            echo -e \"\\r  Running Semgrep security patterns... ✓                      \"
+            echo -e \"\\r  Scanning for malicious code patterns... ✓                      \"
             cat \$TEMP_DIR/semgrep.txt
         fi
         echo
@@ -768,7 +766,7 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ || $run_analysis == "yes" ]]; 
         [ -f \$TEMP_DIR/bandit.txt ] && echo \"  • Python (Bandit): \$(grep -c 'Issue:' \$TEMP_DIR/bandit.txt 2>/dev/null || echo '0') issues found\"
         [ -f \$TEMP_DIR/safety.txt ] && echo \"  • Dependencies (Safety): \$(grep -c 'vulnerability' \$TEMP_DIR/safety.txt 2>/dev/null || echo '0') vulnerabilities\"
         [ -f \$TEMP_DIR/shellcheck.txt ] && echo \"  • Shell Scripts: \$(grep -c 'SC[0-9]' \$TEMP_DIR/shellcheck.txt 2>/dev/null || echo '0') warnings\"
-        [ -f \$TEMP_DIR/semgrep.txt ] && echo \"  • Code Patterns (Semgrep): \$(grep -c '❯❱' \$TEMP_DIR/semgrep.txt 2>/dev/null || echo '0') findings\"
+        [ -f \$TEMP_DIR/semgrep.txt ] && echo \"  • Malicious Patterns: \$(grep -c '❯❱' \$TEMP_DIR/semgrep.txt 2>/dev/null || echo '0') findings\"
         [ -f \$TEMP_DIR/yara.txt ] && [ -s \$TEMP_DIR/yara.txt ] && echo \"  • Malware Patterns: DETECTED - CHECK REPORT\"
         echo
         echo \"📁 Full reports saved to: audit/security_reports/${base_name}_${TIMESTAMP}/\"

@@ -72,7 +72,7 @@ echo
 print_message "$YELLOW" "What would you like to clean?"
 echo "1) Extracted files only"
 echo "2) Submission ZIPs only"
-echo "3) Container logs and temp files"
+echo "3) Logs and temp files"
 echo "4) Docker artifacts (keeps current build)"
 echo "5) Everything (full reset)"
 echo "6) Old files (>7 days)"
@@ -109,7 +109,7 @@ case $choice in
     echo -n "  Cleaning container artifacts"
 
     # Run cleanup operations in background
-    (docker-compose down 2>/dev/null && docker system prune -f >/dev/null 2>&1 && rm -rf audit/*.log) &
+    (docker-compose down 2>/dev/null && docker system prune -f >/dev/null 2>&1 && rm -rf audit/*) &
     PID=$!
 
     # Show spinner while cleaning
