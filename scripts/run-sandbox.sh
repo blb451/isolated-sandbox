@@ -242,6 +242,7 @@ for submission_name in "${submission_names[@]}"; do
         if [ "'"$submission_name"'" = "'"${submission_names[0]}"'" ]; then
             echo "⏳ Updating virus definitions..."
             freshclam 2>/dev/null || true
+            echo
         fi
 
         echo "🔍 Running multi-engine virus scan..."
@@ -372,6 +373,11 @@ for submission_name in "${submission_names[@]}"; do
     if [ $scan_exit_code -ne 0 ]; then
         scan_failed=true
         break
+    fi
+
+    # Add extra spacing between multiple submissions
+    if [ ${#submission_names[@]} -gt 1 ] && [ "$submission_name" != "${submission_names[-1]}" ]; then
+        echo
     fi
 done
 
@@ -652,10 +658,10 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ || $run_analysis == "yes" ]]; 
             echo
         fi
 
-        # Shell script security
-        if find . -name '*.sh' -type f | head -1 > /dev/null 2>&1; then
+        # Shell script security (excluding __MACOSX metadata)
+        if find . -name '*.sh' -type f -not -path '*/__MACOSX/*' | head -1 > /dev/null 2>&1; then
             echo -n '  Analyzing shell scripts with ShellCheck'
-            (find . -name '*.sh' -type f -exec shellcheck {} \; > \$TEMP_DIR/shellcheck.txt 2>&1) &
+            (find . -name '*.sh' -type f -not -path '*/__MACOSX/*' -exec shellcheck {} \; > \$TEMP_DIR/shellcheck.txt 2>&1) &
             SCAN_PID=\$!
 
             # Show spinner while analyzing
@@ -741,7 +747,7 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ || $run_analysis == "yes" ]]; 
         [ -f \$TEMP_DIR/bandit.txt ] && echo \"  • Python (Bandit): \$(grep -c 'Issue:' \$TEMP_DIR/bandit.txt 2>/dev/null || echo '0') issues found\"
         [ -f \$TEMP_DIR/safety.txt ] && echo \"  • Dependencies (Safety): \$(grep -c 'vulnerability' \$TEMP_DIR/safety.txt 2>/dev/null || echo '0') vulnerabilities\"
         [ -f \$TEMP_DIR/shellcheck.txt ] && echo \"  • Shell Scripts: \$(grep -c 'SC[0-9]' \$TEMP_DIR/shellcheck.txt 2>/dev/null || echo '0') warnings\"
-        [ -f \$TEMP_DIR/semgrep.txt ] && echo \"  • Code Patterns (Semgrep): \$(grep -c 'found:' \$TEMP_DIR/semgrep.txt 2>/dev/null || echo '0') findings\"
+        [ -f \$TEMP_DIR/semgrep.txt ] && echo \"  • Code Patterns (Semgrep): \$(grep -c '❯❱' \$TEMP_DIR/semgrep.txt 2>/dev/null || echo '0') findings\"
         [ -f \$TEMP_DIR/yara.txt ] && [ -s \$TEMP_DIR/yara.txt ] && echo \"  • Malware Patterns: DETECTED - CHECK REPORT\"
         echo
         echo \"📁 Full reports saved to: audit/security_reports/${base_name}_${TIMESTAMP}/\"
