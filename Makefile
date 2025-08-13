@@ -32,6 +32,7 @@ setup-hooks:
 	@echo '#!/bin/bash' > .git/hooks/pre-commit
 	@echo '# Custom pre-commit hook with auto-staging for fixed files' >> .git/hooks/pre-commit
 	@echo '' >> .git/hooks/pre-commit
+	@echo 'echo ""' >> .git/hooks/pre-commit
 	@echo '# Run pre-commit hooks' >> .git/hooks/pre-commit
 	@echo 'pre-commit run' >> .git/hooks/pre-commit
 	@echo 'EXIT_CODE=$$?' >> .git/hooks/pre-commit
@@ -51,11 +52,14 @@ setup-hooks:
 	@echo '        echo "📝 Fixed files have been staged. Running pre-commit again to verify..."' >> .git/hooks/pre-commit
 	@echo '        echo ""' >> .git/hooks/pre-commit
 	@echo '        # Run pre-commit again to verify everything passes' >> .git/hooks/pre-commit
+	@echo '        echo ""' >> .git/hooks/pre-commit
 	@echo '        pre-commit run' >> .git/hooks/pre-commit
 	@echo '        EXIT_CODE=$$?' >> .git/hooks/pre-commit
+	@echo '        echo ""' >> .git/hooks/pre-commit
 	@echo '    fi' >> .git/hooks/pre-commit
 	@echo 'fi' >> .git/hooks/pre-commit
 	@echo '' >> .git/hooks/pre-commit
+	@echo 'echo ""' >> .git/hooks/pre-commit
 	@echo 'exit $$EXIT_CODE' >> .git/hooks/pre-commit
 	@chmod +x .git/hooks/pre-commit
 	@echo "Running hooks on all files..."
