@@ -1,16 +1,18 @@
 # Makefile for Thanx Isolated Sandbox development
 
-.PHONY: help install lint format test clean setup-hooks
+.PHONY: help install lint format test clean setup-hooks version version-update
 
 # Default target
 help:
 	@echo "Available targets:"
-	@echo "  install     - Install development dependencies"
-	@echo "  setup-hooks - Install pre-commit hooks"
-	@echo "  lint        - Run linters on shell scripts and Docker files"
-	@echo "  format      - Format shell scripts"
-	@echo "  test        - Run basic functionality tests"
-	@echo "  clean       - Clean up generated files"
+	@echo "  install       - Install development dependencies"
+	@echo "  setup-hooks   - Install pre-commit hooks"
+	@echo "  lint          - Run linters on shell scripts and Docker files"
+	@echo "  format        - Format shell scripts"
+	@echo "  test          - Run basic functionality tests"
+	@echo "  clean         - Clean up generated files"
+	@echo "  version       - Show current version"
+	@echo "  version-update- Update version (usage: make version-update TYPE=patch)"
 
 # Install development dependencies
 install:
@@ -97,3 +99,13 @@ clean:
 	rm -rf extracted/* submissions/* audit/* 2>/dev/null || true
 	docker-compose down --volumes 2>/dev/null || true
 	@echo "Cleanup complete!"
+
+# Show current version
+version:
+	@echo "Thanx Isolated Sandbox v$$(cat VERSION)"
+
+# Update version (major, minor, or patch)
+# Usage: make version-update TYPE=patch
+TYPE ?= patch
+version-update:
+	@./scripts/version-update.sh $(TYPE)

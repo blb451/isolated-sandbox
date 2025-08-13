@@ -210,7 +210,10 @@ thanx-isolated-sandbox/
 ├── scripts/                    # Shell scripts
 │   ├── run-sandbox.sh         # Main execution script
 │   ├── cleanup.sh            # Cleanup utility with progress indicators
-│   └── expose-port.sh        # Dynamic port exposure tool
+│   ├── expose-port.sh        # Dynamic port exposure tool
+│   ├── version-update.sh     # Version management tool
+│   ├── filter_yara.sh       # YARA result filtering
+│   └── launch-sandbox.sh     # IDE launcher
 ├── config/                     # Configuration files
 │   ├── docker-compose.yml    # Container orchestration
 │   └── Dockerfile            # Container image definition
@@ -219,6 +222,7 @@ thanx-isolated-sandbox/
 ├── Dockerfile                 # Symlink to config/Dockerfile
 ├── Makefile                   # Development tasks
 ├── .pre-commit-config.yaml    # Pre-commit hooks configuration
+├── VERSION                    # Current version file
 ├── example-app.zip            # Example submission file
 ├── submissions/               # Quarantined ZIP files (gitignored)
 ├── extracted/                 # Extracted code (gitignored)
@@ -572,6 +576,48 @@ Contributions are welcome! This project uses:
    make test      # Run basic tests
    ```
 5. **Submit a pull request**
+
+### Version Management
+
+The project uses semantic versioning (MAJOR.MINOR.PATCH) stored in the `VERSION` file.
+
+#### Checking Version
+```bash
+# Show current version
+make version
+
+# Or directly
+cat VERSION
+```
+
+#### Updating Version
+```bash
+# Update patch version (e.g., 0.1.22 → 0.1.23)
+make version-update
+
+# Update minor version (e.g., 0.1.23 → 0.2.0)
+make version-update TYPE=minor
+
+# Update major version (e.g., 0.2.0 → 1.0.0)
+make version-update TYPE=major
+
+# Or use the script directly
+./scripts/version-update.sh patch
+./scripts/version-update.sh minor
+./scripts/version-update.sh major
+```
+
+The version update script will:
+- Update the VERSION file
+- Display the version change
+- Optionally commit and tag the release
+- Provide git commands for manual tagging
+
+#### Version Display
+The current version is displayed:
+- In the sandbox banner when running `./scripts/run-sandbox.sh`
+- Via `make version` command
+- In git tags (v0.1.22, v0.2.0, etc.)
 
 ### Areas for Improvement
 - Additional language support (Go, Rust, Java)

@@ -36,9 +36,13 @@ check_docker() {
 }
 
 # Banner
+# Get version from VERSION file if it exists
+VERSION=$(cat VERSION 2>/dev/null || echo "dev")
+
 echo
 print_message "$BLUE" "================================================"
 print_message "$BLUE" "   Thanx Isolated Sandbox - Code Review Tool   "
+print_message "$BLUE" "   Version: v$VERSION"
 print_message "$BLUE" "================================================"
 echo
 
