@@ -19,14 +19,14 @@ rules:
           - pattern: system(...)
           - pattern: exec(...)
           - pattern: spawn(...)
-          - pattern: "`...`"
-          - pattern: "%x(...)"
+          - pattern: '`...`'
+          - pattern: '%x(...)'
           # JavaScript/Node command execution
           - pattern: require("child_process").exec(...)
           - pattern: require("child_process").spawn(...)
           - pattern: require("child_process").execSync(...)
           - pattern: eval(...)
-    message: "Potential command execution that could harm the host system"
+    message: 'Potential command execution that could harm the host system'
     languages: [python, ruby, javascript, typescript]
     severity: WARNING
 
@@ -47,7 +47,7 @@ rules:
           - pattern: open("/System/...", "w")
           - pattern: fs.writeFileSync("/etc/...")
           - pattern: fs.writeFileSync("/usr/...")
-    message: "Potential destructive file operation on system directories"
+    message: 'Potential destructive file operation on system directories'
     languages: [python, ruby, javascript, typescript]
     severity: ERROR
 
@@ -62,7 +62,7 @@ rules:
           - pattern-regex: 'socket.*connect.*exec.*sh'
           - pattern-regex: 'nc\s+-e\s+/bin/(bash|sh)'
           - pattern-regex: 'bash\s+-i\s+>&\s+/dev/tcp'
-    message: "Potential backdoor or reverse shell code"
+    message: 'Potential backdoor or reverse shell code'
     languages: [python, ruby, javascript, bash]
     severity: ERROR
 
@@ -73,7 +73,7 @@ rules:
           - pattern-regex: '(xmrig|minerd|minergate|nicehash)'
           - pattern-regex: 'stratum\+tcp://'
           - pattern-regex: '(monero|bitcoin|ethereum).*wallet'
-    message: "Potential cryptocurrency mining code"
+    message: 'Potential cryptocurrency mining code'
     languages: [python, ruby, javascript, bash]
     severity: WARNING
 
@@ -89,8 +89,8 @@ rules:
           - pattern: fs.readFileSync(".../.ssh/id_rsa")
           # Attempts to send environment variables externally
           - pattern: requests.post(..., data=os.environ)
-          - pattern: fetch(..., {body: JSON.stringify(process.env)})
-    message: "Potential credential or sensitive data theft"
+          - pattern: 'fetch(..., {body: JSON.stringify(process.env)})'
+    message: 'Potential credential or sensitive data theft'
     languages: [python, javascript, typescript, ruby]
     severity: ERROR
 
@@ -99,9 +99,9 @@ rules:
     patterns:
       - pattern-either:
           - pattern-regex: ':\(\)\{:\|:&\};:'
-          - pattern: while True: os.fork()
-          - pattern: "for(;;)fork();"
-    message: "Potential fork bomb or resource exhaustion attack"
+          - pattern: 'while True: os.fork()'
+          - pattern: 'for(;;)fork();'
+    message: 'Potential fork bomb or resource exhaustion attack'
     languages: [python, bash, c, javascript]
     severity: ERROR
 
@@ -113,7 +113,7 @@ rules:
           - pattern-regex: 'service (iptables|firewall|defender) stop'
           - pattern-regex: 'kill.*antivirus'
           - pattern-regex: 'disable.*defender'
-    message: "Attempt to disable security software"
+    message: 'Attempt to disable security software'
     languages: [bash, python, ruby]
     severity: ERROR
 
@@ -131,7 +131,7 @@ rules:
           - pattern: |
               wget ... -O - | bash
           - pattern: urllib.urlretrieve(..., "/tmp/...")
-    message: "Suspicious download and potential code execution"
+    message: 'Suspicious download and potential code execution'
     languages: [python, bash, ruby, javascript]
     severity: WARNING
 
@@ -145,6 +145,6 @@ rules:
           # Ransom note creation
           - pattern-regex: 'YOUR FILES HAVE BEEN ENCRYPTED'
           - pattern-regex: 'pay.*bitcoin.*decrypt'
-    message: "Potential ransomware behavior patterns"
+    message: 'Potential ransomware behavior patterns'
     languages: [python, javascript, ruby]
     severity: ERROR
