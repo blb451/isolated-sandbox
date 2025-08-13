@@ -311,14 +311,24 @@ The sandbox includes a comprehensive database management system:
 ### Database Commands:
 ```bash
 # Inside the container
-db start postgres     # Start PostgreSQL
+db start postgres     # Start PostgreSQL (auto-initializes with UTF8)
 db start mysql        # Start MySQL/MariaDB
 db start redis        # Start Redis
 db start all          # Start all databases
 db stop all           # Stop all databases
 db status             # Check database statuses
 db create sqlite app.db  # Create SQLite database
-```"
+```
+
+#### PostgreSQL Notes:
+- PostgreSQL automatically initializes with UTF8 encoding on first start
+- **For Rails apps**, you need to update `config/database.yml` to connect:
+  - Run `rails-db-config` from your Rails root directory for automatic configuration
+  - Or manually add these settings:
+    ```yaml
+    host: 127.0.0.1
+    username: postgres
+    ```
 
 ## 🔄 Version Management
 
@@ -508,6 +518,33 @@ Permission denied
 3. **Choose editor**: VS Code, Cursor, or terminal
 4. **Work safely**: All commands run in isolated container
 5. **Cleanup**: `scripts/cleanup.sh` when done
+
+### Rails + PostgreSQL Quick Setup
+
+For Rails applications using PostgreSQL:
+
+```bash
+# Inside the container:
+db start postgres           # Start PostgreSQL server
+rails-db-config             # Configure Rails database.yml for PostgreSQL
+bin/rails db:create         # Create your database
+bin/rails db:migrate        # Run migrations
+bin/rails server -b 0.0.0.0 # Start Rails server
+```
+
+The `rails-db-config` command:
+- Updates your `config/database.yml` with correct host/username settings
+- Creates a backup of your original configuration
+- Works from your Rails root directory
+
+You can also manually update `config/database.yml`:
+```yaml
+development:
+  adapter: postgresql
+  host: 127.0.0.1
+  username: postgres
+  # ... rest of your config
+```
 
 ## 📝 Example Session
 

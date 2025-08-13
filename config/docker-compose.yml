@@ -17,16 +17,20 @@ services:
       - ./scripts:/sandbox/scripts:ro
     ports:
       # Expose common development ports - using ranges for automatic fallback
-      - "3000-3010:3000"    # Rails/Node servers - tries 3000, falls back to 3001-3010
-      - "5173-5183:5173"    # Vite dev server - tries 5173, falls back to 5174-5183
-      - "8080-8090:8080"    # Generic web server - tries 8080, falls back to 8081-8090
-      - "5000-5010:5000"    # Flask/Python - tries 5000, falls back to 5001-5010
-      - "8000-8010:8000"    # Django - tries 8000, falls back to 8001-8010
+      - '3000-3010:3000' # Rails/Node servers - tries 3000, falls back to 3001-3010
+      - '3001:3001' # Common alternative port for backend or frontend
+      - '5432:5432' # PostgreSQL database
+      - '3306:3306' # MySQL/MariaDB database
+      - '6379:6379' # Redis cache/queue
+      - '5173-5183:5173' # Vite dev server - tries 5173, falls back to 5174-5183
+      - '8080-8090:8080' # Generic web server - tries 8080, falls back to 8081-8090
+      - '5000-5010:5000' # Flask/Python - tries 5000, falls back to 5001-5010
+      - '8000-8010:8000' # Django - tries 8000, falls back to 8001-8010
     environment:
       - NODE_ENV=development
       - SANDBOX_MODE=isolated
     # Network modes - uncomment one based on security needs
-    network_mode: "bridge"  # Default: isolated network
+    network_mode: 'bridge' # Default: isolated network
     # network_mode: "none"   # Maximum isolation: no network
     # network_mode: "host"   # Least secure: full network access
 
@@ -34,15 +38,15 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'          # Max 2 CPU cores
-          memory: 4G           # Max 4GB RAM
+          cpus: '2.0' # Max 2 CPU cores
+          memory: 4G # Max 4GB RAM
         reservations:
           cpus: '0.5'
           memory: 512M
 
     # Security options
     security_opt:
-      - no-new-privileges:true  # Prevent privilege escalation
+      - no-new-privileges:true # Prevent privilege escalation
       - seccomp:unconfined
       - apparmor:unconfined
 
@@ -57,9 +61,9 @@ services:
       - NET_BIND_SERVICE
 
     # Filesystem restrictions
-    read_only: false  # Set to true for maximum security (breaks some operations)
+    read_only: false # Set to true for maximum security (breaks some operations)
     tmpfs:
-      - /tmp:size=1G,mode=1777  # Limit temp space
+      - /tmp:size=1G,mode=1777 # Limit temp space
       - /var/tmp:size=1G,mode=1777
 
     stdin_open: true

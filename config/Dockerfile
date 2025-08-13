@@ -172,30 +172,75 @@ case "$1" in
     start)
         case "$2" in
             postgres|postgresql)
-                service postgresql start
-                echo "PostgreSQL started on port 5432"
-                echo "Connect with: psql -U postgres"
+                echo ""
+                # Clean up any existing PostgreSQL processes and sockets
+                pkill -9 postgres 2>/dev/null || true
+                rm -f /tmp/.s.PGSQL.* /var/run/postgresql/.s.PGSQL.* 2>/dev/null || true
+
+                # Ensure runtime directories exist with correct permissions
+                mkdir -p /var/run/postgresql /tmp 2>/dev/null || true
+                chown postgres:postgres /var/run/postgresql 2>/dev/null || true
+                chmod 775 /var/run/postgresql 2>/dev/null || true
+
+                # Start PostgreSQL server
+                echo "Starting PostgreSQL..."
+                su - postgres -c "/usr/lib/postgresql/14/bin/pg_ctl -D /var/lib/postgresql/14/main -l /tmp/postgres.log start" 2>&1 | grep -v "could not change directory"
+
+                # Wait for PostgreSQL to be ready (up to 15 seconds)
+                echo "Waiting for PostgreSQL to be ready..."
+                for i in {1..30}; do
+                    if psql -U postgres -h 127.0.0.1 -c "SELECT 1" 2>/dev/null | grep -q "1 row"; then
+                        echo "✅ PostgreSQL started successfully on port 5432"
+                        echo ""
+                        echo "Connection info:"
+                        echo "  Host: 127.0.0.1"
+                        echo "  Port: 5432"
+                        echo "  User: postgres"
+                        echo "  Password: (none)"
+                        echo ""
+                        echo "Test with: psql -U postgres -h 127.0.0.1"
+                        echo ""
+                        echo "💡 For Rails apps, you may need to update config/database.yml:"
+                        echo "   Run: rails-db-config"
+                        echo ""
+                        break
+                    fi
+                    if [ $i -eq 30 ]; then
+                        echo "❌ PostgreSQL failed to start. Checking log..."
+                        tail -20 /tmp/postgres.log 2>/dev/null || echo "No log file found"
+                        exit 1
+                    fi
+                    sleep 0.5
+                done
                 ;;
             mysql|mariadb)
+                echo ""
                 service mariadb start
                 echo "MariaDB/MySQL started on port 3306"
                 echo "Connect with: mysql -u root"
+                echo ""
                 ;;
             redis)
+                echo ""
                 redis-server --daemonize yes
                 echo "Redis started on port 6379"
                 echo "Connect with: redis-cli"
+                echo ""
                 ;;
             memcached)
+                echo ""
                 service memcached start
                 echo "Memcached started on port 11211"
+                echo ""
                 ;;
             all)
-                service postgresql start
-                service mariadb start
-                redis-server --daemonize yes
-                service memcached start
-                echo "All databases started"
+                echo ""
+                echo "Starting all databases..."
+                $0 start postgres
+                $0 start mysql
+                $0 start redis
+                $0 start memcached
+                echo "\nAll databases started"
                 ;;
             *)
                 echo "Usage: db start [postgres|mysql|redis|memcached|all]"
@@ -205,27 +250,37 @@ case "$1" in
     stop)
         case "$2" in
             postgres|postgresql)
-                service postgresql stop
+                echo ""
+                su - postgres -c "/usr/lib/postgresql/14/bin/pg_ctl -D /var/lib/postgresql/14/main stop" 2>&1 | grep -v "could not change directory" || true
                 echo "PostgreSQL stopped"
+                echo ""
                 ;;
             mysql|mariadb)
+                echo ""
                 service mariadb stop
                 echo "MariaDB/MySQL stopped"
+                echo ""
                 ;;
             redis)
+                echo ""
                 redis-cli shutdown
                 echo "Redis stopped"
+                echo ""
                 ;;
             memcached)
+                echo ""
                 service memcached stop
                 echo "Memcached stopped"
+                echo ""
                 ;;
             all)
-                service postgresql stop
-                service mariadb stop
-                redis-cli shutdown 2>/dev/null
-                service memcached stop
-                echo "All databases stopped"
+                echo ""
+                echo "Stopping all databases..."
+                $0 stop postgres
+                $0 stop mysql
+                $0 stop redis
+                $0 stop memcached
+                echo "\nAll databases stopped"
                 ;;
             *)
                 echo "Usage: db stop [postgres|mysql|redis|memcached|all]"
@@ -233,25 +288,29 @@ case "$1" in
         esac
         ;;
     status)
+        echo ""
         echo "=== Database Status ==="
         echo -n "SQLite3: "
         which sqlite3 > /dev/null && echo "Available (v$(sqlite3 --version | cut -d' ' -f1))" || echo "Not installed"
         echo -n "PostgreSQL: "
-        service postgresql status | grep -q "online" && echo "Running" || echo "Stopped"
+        psql -U postgres -h 127.0.0.1 -c "SELECT 1" 2>/dev/null | grep -q "1 row" && echo "Running" || echo "Stopped"
         echo -n "MariaDB/MySQL: "
         service mariadb status | grep -q "running" && echo "Running" || echo "Stopped"
         echo -n "Redis: "
         redis-cli ping 2>/dev/null | grep -q "PONG" && echo "Running" || echo "Stopped"
         echo -n "Memcached: "
         service memcached status | grep -q "running" && echo "Running" || echo "Stopped"
+        echo ""
         ;;
     create)
         case "$2" in
             sqlite|sqlite3)
+                echo ""
                 dbname="${3:-app.db}"
                 sqlite3 "$dbname" "CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY);"
                 echo "SQLite database created: $dbname"
                 echo "Connect with: sqlite3 $dbname"
+                echo ""
                 ;;
             *)
                 echo "Usage: db create sqlite [database_name.db]"
@@ -259,39 +318,82 @@ case "$1" in
         esac
         ;;
     *)
+        echo ""
         echo "Database Management Tool"
         echo ""
         echo "Usage: db [start|stop|status|create] [database]"
         echo ""
         echo "Databases:"
         echo "  sqlite3    - SQLite3 (embedded, no server needed)"
-        echo "  postgres   - PostgreSQL 14"
+        echo "  postgres   - PostgreSQL 14 (pre-initialized with UTF8)"
         echo "  mysql      - MariaDB/MySQL"
-        echo "  redis      - Redis"
-        echo "  memcached  - Memcached"
+        echo "  redis      - Redis key-value store"
+        echo "  memcached  - Memory caching system"
         echo "  all        - All server databases"
         echo ""
         echo "Examples:"
         echo "  db create sqlite app.db  # Create SQLite database"
-        echo "  db start postgres        # Start PostgreSQL"
-        echo "  db stop redis            # Stop Redis"
+        echo "  db start postgres        # Start PostgreSQL server"
+        echo "  db stop redis            # Stop Redis server"
         echo "  db status                # Show all database statuses"
-        echo "  db start all             # Start all server databases"
+        echo "  db start all             # Start all databases"
+        echo ""
+        echo "PostgreSQL Quick Start:"
+        echo "  db start postgres        # Start the server"
+        echo "  psql -U postgres -h 127.0.0.1  # Connect to PostgreSQL"
+        echo "  rails-db-config          # Configure Rails for PostgreSQL"
         echo ""
         echo "SQLite Quick Start:"
-        echo "  sqlite3 development.db   # Open/create SQLite database"
+        echo "  sqlite3 development.db   # Open/create database"
         echo "  .help                    # Show SQLite commands"
         echo "  .tables                  # List tables"
-        echo "  .quit                    # Exit SQLite"
+        echo ""
         ;;
 esac
 EOF
 RUN chmod +x /usr/local/bin/db
 
-# Configure PostgreSQL to allow local connections without password
-RUN echo "local   all             postgres                                trust" > /etc/postgresql/14/main/pg_hba.conf && \
-    echo "host    all             all             127.0.0.1/32            trust" >> /etc/postgresql/14/main/pg_hba.conf && \
-    echo "host    all             all             ::1/128                 trust" >> /etc/postgresql/14/main/pg_hba.conf
+# Pre-initialize PostgreSQL during image build for faster container startup
+# This creates the database cluster with UTF8 encoding and trust authentication
+RUN mkdir -p /var/lib/postgresql/14/main /var/run/postgresql /tmp && \
+    chown -R postgres:postgres /var/lib/postgresql /var/run/postgresql && \
+    chmod 775 /var/run/postgresql && \
+    chmod 1777 /tmp && \
+    su - postgres -c "/usr/lib/postgresql/14/bin/initdb -D /var/lib/postgresql/14/main --encoding=UTF8 --locale=C --auth-local=trust --auth-host=trust" 2>&1 | grep -v "could not change directory" && \
+    echo "PostgreSQL initialized during image build"
+
+# Configure PostgreSQL for easy connection
+RUN cat > /var/lib/postgresql/14/main/postgresql.conf <<EOF
+listen_addresses = '*'
+port = 5432
+max_connections = 100
+shared_buffers = 128MB
+dynamic_shared_memory_type = posix
+unix_socket_directories = '/var/run/postgresql,/tmp'
+log_destination = 'stderr'
+logging_collector = off
+log_line_prefix = '%m [%p] '
+log_timezone = 'UTC'
+datestyle = 'iso, mdy'
+timezone = 'UTC'
+lc_messages = 'C'
+lc_monetary = 'C'
+lc_numeric = 'C'
+lc_time = 'C'
+default_text_search_config = 'pg_catalog.english'
+EOF
+
+# Setup authentication - trust all for development
+RUN cat > /var/lib/postgresql/14/main/pg_hba.conf <<EOF
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+local   all             all                                     trust
+host    all             all             127.0.0.1/32            trust
+host    all             all             0.0.0.0/0               trust
+host    all             all             ::1/128                 trust
+EOF
+
+# Set correct permissions
+RUN chown -R postgres:postgres /var/lib/postgresql/14/main/
 
 # Configure MariaDB for easy access
 RUN echo "[mysqld]\nskip-grant-tables" > /etc/mysql/conf.d/easy-access.cnf
@@ -330,6 +432,66 @@ echo "Install new version: asdf install <language> <version>"
 echo "List all available: asdf list all <language>"
 EOF
 RUN chmod +x /usr/local/bin/versions
+
+# Create Rails database configuration script
+RUN cat > /usr/local/bin/rails-db-config <<'EOF'
+#!/bin/bash
+
+# Simple script to add PostgreSQL connection settings to Rails database.yml
+CONFIG_FILE="${1:-config/database.yml}"
+
+echo ""
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "❌ Error: database.yml not found at: $CONFIG_FILE"
+    echo ""
+    echo "Usage: rails-db-config [path/to/database.yml]"
+    echo "   or run from Rails root directory"
+    echo ""
+    exit 1
+fi
+
+echo "📝 Updating $CONFIG_FILE for PostgreSQL in Docker..."
+
+# Create backup with timestamp
+BACKUP_FILE="${CONFIG_FILE}.backup.$(date +%Y%m%d_%H%M%S)"
+cp "$CONFIG_FILE" "$BACKUP_FILE"
+echo "  ✓ Backup created: $BACKUP_FILE"
+
+# Add PostgreSQL connection settings if not already present
+if ! grep -q "host: 127.0.0.1" "$CONFIG_FILE"; then
+    # Use awk to properly add settings after adapter lines
+    awk '
+    /^[[:space:]]*adapter:[[:space:]]*postgresql/ {
+        print
+        in_pg_section = 1
+        next
+    }
+    in_pg_section && /^[[:space:]]*encoding:/ {
+        print
+        print "  host: 127.0.0.1"
+        print "  username: postgres"
+        in_pg_section = 0
+        next
+    }
+    { print }
+    ' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+    echo "  ✓ Added PostgreSQL connection settings"
+else
+    echo "  ✓ Already configured"
+fi
+
+echo ""
+echo "✅ Configuration complete!"
+echo ""
+echo "Next steps:"
+echo "  1. Start PostgreSQL: db start postgres"
+echo "  2. Create database: bin/rails db:create"
+echo "  3. Run migrations: bin/rails db:migrate"
+echo "  4. Start Rails: bin/rails server -b 0.0.0.0"
+echo ""
+EOF
+RUN chmod +x /usr/local/bin/rails-db-config
 
 # Create terminal connection helper script
 RUN cat > /usr/local/bin/terminal <<'EOF'
@@ -405,10 +567,11 @@ RUN echo 'source ~/.asdf/asdf.sh' >> ~/.bashrc && \
     echo 'echo "================================================"' >> ~/.bashrc && \
     echo 'echo ""' >> ~/.bashrc && \
     echo 'echo "Quick Commands:"' >> ~/.bashrc && \
-    echo 'echo "  serve     - Show dev server commands reference"' >> ~/.bashrc && \
-    echo 'echo "  versions  - Show available language versions"' >> ~/.bashrc && \
-    echo 'echo "  db        - Manage databases (postgres, mysql, redis)"' >> ~/.bashrc && \
-    echo 'echo "  terminal  - Show how to open another terminal here"' >> ~/.bashrc && \
+    echo 'echo "  serve            - Show dev server commands reference"' >> ~/.bashrc && \
+    echo 'echo "  versions         - Show available language versions"' >> ~/.bashrc && \
+    echo 'echo "  db               - Manage databases (postgres, mysql, redis)"' >> ~/.bashrc && \
+    echo 'echo "  rails-db-config  - Auto-configure Rails for PostgreSQL"' >> ~/.bashrc && \
+    echo 'echo "  terminal         - Show how to open another terminal here"' >> ~/.bashrc && \
     echo 'echo ""' >> ~/.bashrc && \
     echo 'echo "Examples:"' >> ~/.bashrc && \
     echo 'echo "  asdf set ruby 3.2.2       # Switch Ruby version"' >> ~/.bashrc && \
