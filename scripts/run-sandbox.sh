@@ -312,6 +312,11 @@ for submission_name in "${submission_names[@]}"; do
             done
             wait $SCAN_PID
 
+            # Apply exclusions if config file exists
+            if [ -f /sandbox/config/yara-exclusions-for-code-repos.txt ] && [ -f /sandbox/scripts/filter_yara.sh ]; then
+                /sandbox/scripts/filter_yara.sh 2>/dev/null || true
+            fi
+
             # Filter out warnings and get only actual detections
             YARA_RESULT=$(cat /tmp/yara_result 2>/dev/null | grep -v "^warning:" | grep -v "^$")
             YARA_WARNINGS=$(cat /tmp/yara_warnings 2>/dev/null | grep "^warning:" | wc -l)
@@ -469,13 +474,54 @@ if ! docker-compose run --rm sandbox bash -c '
     # Run recursive ClamAV scan on extracted contents with progress
     echo -e "\r  🔍 Deep scanning extracted files..."
 
-    # Count files first for progress indication
-    FILE_COUNT=$(find /sandbox/extracted/'"$base_name"' -type f | wc -l)
-    echo "  📁 Found $FILE_COUNT files to scan"
+    # Define directories to exclude from deep scanning
+    EXCLUDE_DIRS="node_modules vendor .git venv .venv target dist build .pytest_cache __pycache__ .tox"
 
-    # Run scan with verbose output for progress
-    echo -n "  ⚡ Scanning"
-    (clamscan --infected --remove=no --recursive /sandbox/extracted/'"$base_name"' > /tmp/deep_scan 2>&1) &
+    # Build find command with exclusions
+    FIND_CMD="find /sandbox/extracted/'"$base_name"' -type f"
+    for dir in $EXCLUDE_DIRS; do
+        FIND_CMD="$FIND_CMD -not -path \"*/$dir/*\""
+    done
+
+    # Count files first for progress indication (excluding dependency directories)
+    FILE_COUNT=$(eval "$FIND_CMD" | wc -l)
+    echo "  📁 Found $FILE_COUNT project files to scan (excluding dependencies)"
+
+    # Check for dependency manifests and suggest audit commands
+    MANIFESTS_FOUND=""
+    if [ -n "$(find /sandbox/extracted/'"$base_name"' -name "package.json" -type f 2>/dev/null)" ]; then
+        MANIFESTS_FOUND="$MANIFESTS_FOUND npm"
+    fi
+    if [ -n "$(find /sandbox/extracted/'"$base_name"' -name "Gemfile" -type f 2>/dev/null)" ]; then
+        MANIFESTS_FOUND="$MANIFESTS_FOUND ruby"
+    fi
+    if [ -n "$(find /sandbox/extracted/'"$base_name"' -name "requirements.txt" -type f 2>/dev/null)" ]; then
+        MANIFESTS_FOUND="$MANIFESTS_FOUND python"
+    fi
+
+    if [ -n "$MANIFESTS_FOUND" ]; then
+        echo "  💡 Tip: To audit dependencies after installing them in Docker:"
+        if [[ "$MANIFESTS_FOUND" == *"npm"* ]]; then
+            echo "     npm audit (after npm install)"
+        fi
+        if [[ "$MANIFESTS_FOUND" == *"ruby"* ]]; then
+            echo "     bundle-audit check (after bundle install)"
+        fi
+        if [[ "$MANIFESTS_FOUND" == *"python"* ]]; then
+            echo "     safety check -r requirements.txt (after pip install)"
+        fi
+    fi
+
+    # Run scan with verbose output for progress (excluding dependency directories)
+    echo -n "  ⚡ Scanning project files"
+
+    # Build clamscan exclude options
+    CLAM_EXCLUDES=""
+    for dir in $EXCLUDE_DIRS; do
+        CLAM_EXCLUDES="$CLAM_EXCLUDES --exclude-dir=$dir"
+    done
+
+    (clamscan --infected --remove=no --recursive $CLAM_EXCLUDES /sandbox/extracted/'"$base_name"' > /tmp/deep_scan 2>&1) &
     SCAN_PID=$!
 
     # Show progress with spinner
@@ -528,7 +574,7 @@ print_message "$GREEN" "✓ Deep scan complete - extracted files are clean"
 echo
 print_message "$YELLOW" "Run additional security analysis? (y/n, default: y):"
 read -r run_analysis
-if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ ]]; then
+if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ || $run_analysis == "yes" ]]; then
     echo
     print_message "$YELLOW" "Running security analysis tools..."
 

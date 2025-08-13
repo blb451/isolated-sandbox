@@ -11,6 +11,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Mount audit log directory
       - ./audit:/sandbox/audit
+      # Mount config directory (read-only)
+      - ./config:/sandbox/config:ro
+      # Mount scripts directory (read-only)
+      - ./scripts:/sandbox/scripts:ro
     ports:
       # Expose common development ports - using ranges for automatic fallback
       - "3000-3010:3000"    # Rails/Node servers - tries 3000, falls back to 3001-3010

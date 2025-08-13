@@ -1,0 +1,30 @@
+# YARA Rule Exclusions for Code Repository ZIP Scanning
+# Minimal exclusions to reduce false positives while maintaining security
+#
+# ⚠️  WORK IN PROGRESS: This exclusion list is still being tuned based on
+# real-world testing with various code repositories. If you encounter false
+# positives or false negatives, please report them so we can adjust the ruleset.
+
+# EXCLUDE: Generic base64 detection (too common in legitimate code)
+possible_includes_base64_packed_functions
+contains_base64
+
+# EXCLUDE: Large number patterns (common in crypto implementations and test data)
+Big_Numbers3
+
+# KEEP ALL OF THESE - Still important for security:
+# - Base64_Encoded_Executable (specific executable patterns)
+# - UPX_Packer, ASPack, VMProtect, Themida (actual malware packers)
+# - All trojan/backdoor/RAT specific rules
+# - All ransomware rules
+# - All keylogger rules
+# - All specific malware family rules
+# - Suspicious PE header anomalies
+# - Known exploit signatures
+
+# Note: We're only excluding the most generic rules that trigger on
+# normal code patterns. Real malware will still be caught by:
+# 1. ClamAV signatures
+# 2. Specific malware family YARA rules
+# 3. Behavioral patterns unique to malware
+# 4. Known exploit signatures

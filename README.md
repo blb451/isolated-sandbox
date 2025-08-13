@@ -5,6 +5,7 @@ A secure Docker-based environment for reviewing and running untrusted code submi
 ## 🔒 Security Features
 
 - **Multi-Layer Virus Scanning**: ClamAV + YARA rules for comprehensive malware detection
+  - *Note: YARA ruleset is being tuned to reduce false positives for code repositories*
 - **Complete Isolation**: All code execution happens inside Docker containers
 - **No Host Access**: Submissions cannot access your host filesystem
 - **Network Control**: Isolated network environment (configurable)
