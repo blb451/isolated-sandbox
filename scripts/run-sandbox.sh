@@ -438,11 +438,28 @@ echo 'Extraction complete'
 
 # Store the extracted project path for later use
 EXTRACTED_PROJECT_PATH="/sandbox/extracted/$base_name"
+HOST_EXTRACTED_PATH="$(pwd)/extracted/$base_name"
+
+# Check for Docker Compose files and warn about Docker-in-Docker limitations
+compose_files_found=false
+while IFS= read -r compose_file; do
+    compose_files_found=true
+    relative_path="${compose_file#extracted/$base_name/}"
+done < <(find "extracted/$base_name" \( -name "docker-compose.yml" -o -name "docker-compose.yaml" -o -name "compose.yml" -o -name "compose.yaml" \) 2>/dev/null)
+
+if [ "$compose_files_found" = true ]; then
+    print_message "$YELLOW" "⚠️  Docker Compose files detected in the submission"
+    print_message "$BLUE" "  Note: Docker-in-Docker has limitations with volume mounts."
+    print_message "$BLUE" "  The Docker socket is mounted, but volume paths from inside"
+    print_message "$BLUE" "  the container may not be accessible to the host Docker daemon."
+    print_message "$BLUE" "  If you encounter mount errors, try running the app directly"
+    print_message "$BLUE" "  without Docker (e.g., bundle install && rails server)."
+fi
 
 print_message "$GREEN" "✓ Submission extracted successfully"
 
 # Add a simple warning file without breaking permissions
-cat >"extracted/$base_name/README_SECURITY_WARNING.txt" <<'EOF'
+cat >"extracted/$base_name/README_SECURITY_WARNING.txt" <<EOF
 ⚠️  SECURITY WARNING ⚠️
 
 This directory contains UNTRUSTED code from a submission.
