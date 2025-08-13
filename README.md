@@ -210,8 +210,7 @@ thanx-isolated-sandbox/
 ├── scripts/                    # Shell scripts
 │   ├── run-sandbox.sh         # Main execution script
 │   ├── cleanup.sh            # Cleanup utility with progress indicators
-│   ├── expose-port.sh        # Dynamic port exposure tool
-│   └── security-scan.sh      # Comprehensive security analysis tool
+│   └── expose-port.sh        # Dynamic port exposure tool
 ├── config/                     # Configuration files
 │   ├── docker-compose.yml    # Container orchestration
 │   └── Dockerfile            # Container image definition
@@ -380,10 +379,7 @@ The main script will prompt to run additional security analysis after virus scan
 
 #### Manual Analysis:
 ```bash
-# Comprehensive security report
-scripts/security-scan.sh
-
-# Or run specific tools inside container (adjust path to your project)
+# Run specific tools inside container (adjust path to your project)
 docker-compose run --rm sandbox bash
 bandit -r /sandbox/extracted/example-app          # Python security
 safety check -r requirements.txt                  # Python dependencies

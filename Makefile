@@ -27,15 +27,39 @@ install:
 # Setup pre-commit hooks with auto-staging
 setup-hooks:
 	@echo "Installing pre-commit hooks with auto-staging..."
-	pre-commit install
-	@echo "Configuring auto-staging for fixed files..."
-	@chmod +x scripts/auto-stage-hook.sh
+	@pre-commit install
+	@echo "Adding auto-staging functionality..."
 	@echo '#!/bin/bash' > .git/hooks/pre-commit
-	@echo '# Auto-generated hook that stages fixes from pre-commit' >> .git/hooks/pre-commit
-	@echo 'exec scripts/auto-stage-hook.sh' >> .git/hooks/pre-commit
+	@echo '# Custom pre-commit hook with auto-staging for fixed files' >> .git/hooks/pre-commit
+	@echo '' >> .git/hooks/pre-commit
+	@echo '# Run pre-commit hooks' >> .git/hooks/pre-commit
+	@echo 'pre-commit run' >> .git/hooks/pre-commit
+	@echo 'EXIT_CODE=$$?' >> .git/hooks/pre-commit
+	@echo '' >> .git/hooks/pre-commit
+	@echo '# If pre-commit made changes (exit code 1), stage and re-run' >> .git/hooks/pre-commit
+	@echo 'if [ $$EXIT_CODE -eq 1 ]; then' >> .git/hooks/pre-commit
+	@echo '    # Check if there are unstaged changes (meaning pre-commit fixed something)' >> .git/hooks/pre-commit
+	@echo '    if ! git diff --exit-code --quiet; then' >> .git/hooks/pre-commit
+	@echo '        echo ""' >> .git/hooks/pre-commit
+	@echo '        echo "✨ Pre-commit hooks fixed some issues. Auto-staging the changes..."' >> .git/hooks/pre-commit
+	@echo '        # Get list of files that were originally staged' >> .git/hooks/pre-commit
+	@echo '        STAGED_FILES=$$(git diff --name-only --cached)' >> .git/hooks/pre-commit
+	@echo '        # Re-add only the files that were originally staged' >> .git/hooks/pre-commit
+	@echo '        if [ -n "$$STAGED_FILES" ]; then' >> .git/hooks/pre-commit
+	@echo '            echo "$$STAGED_FILES" | xargs git add' >> .git/hooks/pre-commit
+	@echo '        fi' >> .git/hooks/pre-commit
+	@echo '        echo "📝 Fixed files have been staged. Running pre-commit again to verify..."' >> .git/hooks/pre-commit
+	@echo '        echo ""' >> .git/hooks/pre-commit
+	@echo '        # Run pre-commit again to verify everything passes' >> .git/hooks/pre-commit
+	@echo '        pre-commit run' >> .git/hooks/pre-commit
+	@echo '        EXIT_CODE=$$?' >> .git/hooks/pre-commit
+	@echo '    fi' >> .git/hooks/pre-commit
+	@echo 'fi' >> .git/hooks/pre-commit
+	@echo '' >> .git/hooks/pre-commit
+	@echo 'exit $$EXIT_CODE' >> .git/hooks/pre-commit
 	@chmod +x .git/hooks/pre-commit
 	@echo "Running hooks on all files..."
-	pre-commit run --all-files || echo "Some files were formatted - review changes"
+	@pre-commit run --all-files || echo "Some files were formatted - review changes"
 	@echo "✅ Pre-commit hooks installed with auto-staging enabled!"
 
 # Lint shell scripts and Docker files (non-fixable checks)
