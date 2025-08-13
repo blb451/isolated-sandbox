@@ -703,6 +703,10 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ || $run_analysis == "yes" ]]; 
         fi
 
         # General code security with Semgrep
+        # Note: Semgrep is a static code analysis tool that checks for security vulnerabilities,
+        # but it would also likely catch any malicious code patterns that could harm the machine
+        # of the person running the code (e.g., backdoors, suspicious network calls, etc.)
+        # TODO: Tune Semgrep rules to reduce false positives while maintaining detection of actual threats
         echo -n '  Running Semgrep security patterns'
         (semgrep --config=auto --quiet . > \$TEMP_DIR/semgrep.txt 2>&1) &
         SCAN_PID=\$!
