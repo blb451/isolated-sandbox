@@ -203,15 +203,8 @@ elif [ "$DOCKERFILE_CHANGED" -eq 1 ]; then
     print_message "$BLUE" "   Future builds will use cached layers."
     echo
 else
-    # Quick check: if Ruby layer is missing, we still need extended timeout
-    if ! docker images -q thanx-isolated-sandbox-sandbox 2>/dev/null | xargs -I {} docker history {} 2>/dev/null | grep -q "asdf install ruby"; then
-        BUILD_TIMEOUT=1200 # 20 minutes for rebuilding language layers
-        print_message "$BLUE" "⏳ Rebuilding language layers. This will take a while..."
-        print_message "$BLUE" "   Installing Ruby, Node.js, and Python versions."
-        echo
-    else
-        BUILD_TIMEOUT=300 # 5 minutes for regular cached builds
-    fi
+    # For regular builds, just use standard timeout without the misleading message
+    BUILD_TIMEOUT=300 # 5 minutes for regular cached builds
 fi
 if ! timeout $BUILD_TIMEOUT docker-compose build; then
     if [ $? -eq 124 ]; then
@@ -237,9 +230,10 @@ for submission_name in "${submission_names[@]}"; do
     print_message "$BLUE" "Scanning $submission_name..."
 
     # Run multi-engine scan inline with progress indicators
-    if ! docker-compose run --rm sandbox bash -c '
+    docker-compose run --rm sandbox bash -c '
         FILE_PATH="/sandbox/submissions/'"$submission_name"'"
         THREATS_FOUND=0
+        YARA_SUSPICIOUS=0
 
         # Define spinner frames inside container
         SPINNER_FRAMES=("⣾" "⣽" "⣻" "⢿" "⡿" "⣟" "⣯" "⣷")
@@ -305,7 +299,8 @@ for submission_name in "${submission_names[@]}"; do
         # 3. YARA rules scan (if available) with progress
         if [ -d /opt/yara-rules/rules ] && command -v yara >/dev/null 2>&1; then
             echo -n "  [3/3] YARA Rules: Scanning"
-            (yara -r /opt/yara-rules/rules "$FILE_PATH" > /tmp/yara_result 2>&1) &
+            # Find and compile only .yar files, avoiding directories and other files
+            (find /opt/yara-rules/rules -name "*.yar" -type f 2>/dev/null | head -20 | xargs -I {} yara {} "$FILE_PATH" 2>/tmp/yara_warnings > /tmp/yara_result) &
             SCAN_PID=$!
 
             # Show spinner while scanning
@@ -317,14 +312,38 @@ for submission_name in "${submission_names[@]}"; do
             done
             wait $SCAN_PID
 
-            YARA_RESULT=$(cat /tmp/yara_result 2>/dev/null)
+            # Filter out warnings and get only actual detections
+            YARA_RESULT=$(cat /tmp/yara_result 2>/dev/null | grep -v "^warning:" | grep -v "^$")
+            YARA_WARNINGS=$(cat /tmp/yara_warnings 2>/dev/null | grep "^warning:" | wc -l)
+
             if [ -n "$YARA_RESULT" ]; then
                 echo -e "\r  [3/3] YARA Rules: ⚠️  SUSPICIOUS PATTERNS    "
-                THREATS_FOUND=$((THREATS_FOUND + 1))
+                YARA_SUSPICIOUS=1
+
+                # Save full results to audit folder
+                SUBMISSION_BASE=$(basename "$FILE_PATH" .zip)
+                mkdir -p /sandbox/audit
+                echo "YARA Scan Results for $SUBMISSION_BASE" > "/sandbox/audit/${SUBMISSION_BASE}_yara_scan.txt"
+                echo "=====================================" >> "/sandbox/audit/${SUBMISSION_BASE}_yara_scan.txt"
+                echo "" >> "/sandbox/audit/${SUBMISSION_BASE}_yara_scan.txt"
+                echo "Detections:" >> "/sandbox/audit/${SUBMISSION_BASE}_yara_scan.txt"
+                echo "$YARA_RESULT" >> "/sandbox/audit/${SUBMISSION_BASE}_yara_scan.txt"
+                echo "" >> "/sandbox/audit/${SUBMISSION_BASE}_yara_scan.txt"
+                echo "Warnings: $YARA_WARNINGS rule inefficiencies detected" >> "/sandbox/audit/${SUBMISSION_BASE}_yara_scan.txt"
+
+                # Show detection details to user
+                echo ""
+                echo "  YARA Detection Details:"
+                echo "  ────────────────────────"
+                echo "$YARA_RESULT" | head -10
+                if [ $(echo "$YARA_RESULT" | wc -l) -gt 10 ]; then
+                    echo "    ... (more detections in audit file)"
+                fi
+                echo "  Full results saved to: audit/${SUBMISSION_BASE}_yara_scan.txt"
             else
                 echo -e "\r  [3/3] YARA Rules: ✅ Clean                  "
             fi
-            rm -f /tmp/yara_result
+            rm -f /tmp/yara_result /tmp/yara_warnings
         else
             echo "  [3/3] YARA: ⏭️  Skipped (rules not loaded)"
         fi
@@ -332,14 +351,20 @@ for submission_name in "${submission_names[@]}"; do
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo -n "📊 Scan Summary: "
-        if [ $THREATS_FOUND -eq 0 ]; then
+        if [ $THREATS_FOUND -eq 0 ] && [ $YARA_SUSPICIOUS -eq 0 ]; then
             echo "✅ All scanners report file as CLEAN"
             exit 0
-        else
+        elif [ $THREATS_FOUND -gt 0 ]; then
             echo "⚠️  $THREATS_FOUND scanner(s) detected potential threats!"
             exit 1
+        else
+            # Only YARA found something
+            echo "⚠️  Suspicious patterns detected, may require additional investigation"
+            exit 2
         fi
-    '; then
+    '
+    scan_exit_code=$?
+    if [ $scan_exit_code -ne 0 ]; then
         scan_failed=true
         break
     fi
@@ -350,8 +375,12 @@ if [ "$scan_failed" = true ]; then
     if ! check_docker; then
         print_message "$RED" "Error: Docker connection lost during scan."
         print_message "$RED" "The process cannot continue."
+    elif [ "$scan_exit_code" -eq 2 ]; then
+        # YARA-only detection (exit code 2)
+        print_message "$YELLOW" "⚠️  Suspicious patterns detected, may require additional investigation."
+        print_message "$YELLOW" "The submission contains code patterns that warrant review."
     else
-        # This means ClamAV actually detected malware
+        # ClamAV or RKHunter detected actual malware (exit code 1)
         print_message "$RED" "⚠️  WARNING: Virus or malware detected!"
         print_message "$RED" "The submission has been quarantined and will not be extracted."
     fi

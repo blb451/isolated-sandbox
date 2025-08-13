@@ -73,9 +73,10 @@ print_message "$YELLOW" "What would you like to clean?"
 echo "1) Extracted files only"
 echo "2) Submission ZIPs only"
 echo "3) Container logs and temp files"
-echo "4) Everything (full reset)"
-echo "5) Old files (>7 days)"
-echo "6) Exit"
+echo "4) Docker artifacts (keeps current build)"
+echo "5) Everything (full reset)"
+echo "6) Old files (>7 days)"
+echo "7) Exit"
 read -r choice
 
 case $choice in
@@ -123,6 +124,109 @@ case $choice in
     echo -e "\r  ✓ Container artifacts cleaned                 "
     ;;
 4)
+    echo
+    echo -n "  Analyzing Docker build cache and images"
+
+    # Get info about Docker images and build cache
+    CURRENT_IMAGE=$(docker images thanx-isolated-sandbox-sandbox:latest -q 2>/dev/null)
+    OLD_IMAGES=$(docker images thanx-isolated-sandbox-sandbox --filter "before=thanx-isolated-sandbox-sandbox:latest" -q 2>/dev/null | grep -v "$CURRENT_IMAGE" || true)
+    DANGLING=$(docker images -f "dangling=true" -q 2>/dev/null)
+
+    # Get build cache information more accurately
+    BUILD_CACHE_BEFORE=$(docker system df 2>/dev/null | grep "Build Cache" | awk '{print $3}' || echo "0B")
+    # Count all build cache entries, not just ones with our name
+    BUILD_CACHE_COUNT=$(docker builder du 2>/dev/null | wc -l || echo 0)
+
+    echo -e "\r  Docker System Cleanup                        "
+    echo
+
+    # Count stopped containers
+    STOPPED_CONTAINERS=$(docker ps -a -q --filter "status=exited" | wc -l | tr -d ' ')
+    # Count unused volumes
+    UNUSED_VOLUMES=$(docker volume ls -q -f dangling=true | wc -l | tr -d ' ')
+
+    # Always show what we found
+    print_message "$YELLOW" "  Found the following to clean:"
+
+    # Show what can be cleaned
+    [ -n "$OLD_IMAGES" ] && echo "    • Old sandbox images: $(echo "$OLD_IMAGES" | wc -l | tr -d ' ')"
+    [ -n "$DANGLING" ] && echo "    • Dangling images: $(echo "$DANGLING" | wc -l | tr -d ' ')"
+    [ "$STOPPED_CONTAINERS" -gt 0 ] && echo "    • Stopped containers: $STOPPED_CONTAINERS"
+    [ "$UNUSED_VOLUMES" -gt 0 ] && echo "    • Unused volumes: $UNUSED_VOLUMES"
+    [ "$BUILD_CACHE_COUNT" -gt 1 ] && echo "    • Build cache entries: $BUILD_CACHE_COUNT ($BUILD_CACHE_BEFORE)"
+
+    if [ -z "$OLD_IMAGES" ] && [ -z "$DANGLING" ] && [ "$BUILD_CACHE_COUNT" -le 1 ] && [ "$STOPPED_CONTAINERS" -eq 0 ] && [ "$UNUSED_VOLUMES" -eq 0 ]; then
+        print_message "$GREEN" "  ✓ Nothing to clean"
+        print_message "$BLUE" "  Current build and container preserved"
+    else
+        print_message "$GREEN" "  Will preserve: Current build & most recent container"
+        echo
+        print_message "$YELLOW" "  Proceed with cleanup? (y/n):"
+        read -r confirm
+
+        if [[ $confirm =~ ^[Yy]$ ]]; then
+            echo -n "  Cleaning Docker system"
+
+            # Clean up in background with spinner
+            (
+                # Remove old sandbox images (but keep current)
+                if [ -n "$OLD_IMAGES" ]; then
+                    echo "$OLD_IMAGES" | xargs docker rmi -f >/dev/null 2>&1 || true
+                fi
+
+                # Remove unused volumes (not attached to any container)
+                docker volume prune -f >/dev/null 2>&1
+
+                # Remove old stopped containers (but keep the most recent sandbox container)
+                # Get the most recent sandbox container ID
+                RECENT_CONTAINER=$(docker ps -a --filter "ancestor=thanx-isolated-sandbox-sandbox:latest" --format "{{.ID}}" | head -1)
+                # Remove all stopped containers except the most recent sandbox one
+                docker ps -a -q --filter "status=exited" | while read container; do
+                    if [ "$container" != "$RECENT_CONTAINER" ]; then
+                        docker rm "$container" >/dev/null 2>&1 || true
+                    fi
+                done
+
+                # Remove dangling images (layers not tagged and not used by any container)
+                docker image prune -f >/dev/null 2>&1
+
+                # Remove unused networks (not used by any container)
+                docker network prune -f >/dev/null 2>&1
+
+                # Remove unused build cache (keeps cache used by existing images)
+                # This preserves cache for the current thanx-isolated-sandbox-sandbox:latest
+                docker builder prune -f >/dev/null 2>&1
+
+                # Also clean up any unused buildx cache
+                docker buildx prune -f >/dev/null 2>&1 || true
+            ) &
+            PID=$!
+
+            # Show spinner while cleaning
+            while ps -p $PID >/dev/null 2>&1; do
+                for frame in "${SPINNER_FRAMES[@]}"; do
+                    printf "\r  Cleaning Docker system %s" "$frame"
+                    sleep 0.1
+                done
+            done
+            wait $PID
+
+            echo -e "\r  ✓ Docker system cleaned                                     "
+
+            # Show space reclaimed
+            BUILD_CACHE_AFTER=$(docker system df 2>/dev/null | grep "Build Cache" | awk '{print $3}' || echo "0B")
+            print_message "$GREEN" "  Build cache before: $BUILD_CACHE_BEFORE"
+            print_message "$GREEN" "  Build cache after: $BUILD_CACHE_AFTER"
+            print_message "$BLUE" "  Run 'docker system df' to see full details"
+            echo
+            print_message "$YELLOW" "  Note: Docker Desktop's Build History shows metadata only."
+            print_message "$YELLOW" "        These records don't consume significant disk space."
+        else
+            print_message "$BLUE" "  Cleanup cancelled"
+        fi
+    fi
+    ;;
+5)
     print_message "$RED" "⚠️  This will remove all data and reset the sandbox!"
     echo
     print_message "$YELLOW" "Are you sure? (type 'yes' to confirm):"
@@ -187,7 +291,7 @@ case $choice in
         print_message "$BLUE" "Cleanup cancelled"
     fi
     ;;
-5)
+6)
     echo
     echo -n "  Scanning for old files"
 
@@ -218,7 +322,7 @@ case $choice in
         echo -e "\r  ✓ No old files found (>7 days)               "
     fi
     ;;
-6)
+7)
     print_message "$GREEN" "Exiting..."
     ;;
 *)
