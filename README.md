@@ -5,7 +5,6 @@ A secure Docker-based environment for reviewing and running untrusted code submi
 ## 🔒 Security Features
 
 - **Multi-Layer Virus Scanning**: ClamAV + YARA rules for comprehensive malware detection
-  - *Note: YARA ruleset is being tuned to reduce false positives for code repositories*
 - **Complete Isolation**: All code execution happens inside Docker containers
 - **No Host Access**: Submissions cannot access your host filesystem
 - **Network Control**: Isolated network environment (configurable)
@@ -242,10 +241,13 @@ thanx-isolated-sandbox/
 - Original file remains untouched
 - Path sanitization prevents directory traversal
 
-### 2. Virus Scanning
-- ClamAV scans the ZIP before extraction
-- Updated virus definitions via `freshclam`
-- Blocks extraction if threats detected
+### 2. Multi-Engine Virus Scanning
+- Three-layer security scan before extraction:
+  - ClamAV with updated virus definitions
+  - RKHunter for rootkit detection
+  - YARA rules for malware pattern matching
+- Blocks extraction if any scanner detects threats
+- Deep scan of extracted files after extraction
 - Optional override for testing (use with extreme caution)
 
 ### 3. Extraction & Cleanup
@@ -260,10 +262,16 @@ thanx-isolated-sandbox/
 - All commands run inside Ubuntu 22.04 container
 - Multiple language versions via asdf:
   - Node.js: 22.0.0, 23.6.1, 23.10.0, latest
-  - Ruby: 2.7.5, 2.7.7, 3.1.4, 3.2.0, 3.2.2, 3.3.0, latest
+  - Ruby: 2.7.5, 2.7.7, 3.1.4, 3.2.0, 3.2.2, 3.3.0, 3.4.3, latest
   - Python: 3.10.13, 3.11.9, latest
-- Pre-installed databases: PostgreSQL, MySQL/MariaDB, Redis, SQLite, Memcached
+- Pre-installed and configured databases:
+  - PostgreSQL 14 (pre-initialized with UTF8 encoding)
+  - MySQL/MariaDB
+  - Redis
+  - SQLite3
+  - Memcached
 - Database management via `db` command
+- Rails PostgreSQL configuration via `rails-db-config` command
 - Version switching via `versions` command
 - Network access for package installation
 - Host filesystem completely protected
@@ -280,12 +288,18 @@ thanx-isolated-sandbox/
 The sandbox exposes common development ports and allows dynamic port exposure:
 
 ### Pre-configured Ports:
-- **3000** - Rails server, Express apps
-- **5173** - Vite development server
-- **8080** - Generic web servers
+- **3000-3010** - Rails/Node servers (with automatic fallback)
+- **3001** - Alternative backend/frontend port
+- **5173-5183** - Vite development server (with fallback)
+- **8080-8090** - Generic web servers (with fallback)
+- **5000-5010** - Flask/Python apps (with fallback)
+- **8000-8010** - Django apps (with fallback)
+- **5432** - PostgreSQL database
+- **3306** - MySQL/MariaDB database
+- **6379** - Redis cache/queue
 
 ### Exposing Additional Ports:
-If your application runs on a different port (e.g., Next.js on 4000, Django on 8000):
+If your application runs on a different port not listed above:
 
 ```bash
 # Option 1: From the main menu
@@ -322,7 +336,7 @@ db create sqlite app.db  # Create SQLite database
 
 #### PostgreSQL Notes:
 - PostgreSQL automatically initializes with UTF8 encoding on first start
-- **For Rails apps**, you need to update `config/database.yml` to connect:
+- **For Rails apps**, you may need to update `config/database.yml` to connect:
   - Run `rails-db-config` from your Rails root directory for automatic configuration
   - Or manually add these settings:
     ```yaml
@@ -659,6 +673,7 @@ The current version is displayed:
 ### Areas for Improvement
 - Additional language support (Go, Rust, Java)
 - Enhanced security features
+- Ruleset tuning for Semgrep/YARA to reduce false positives
 - Better IDE integrations
 - Performance optimizations
 - Windows/WSL2 support
