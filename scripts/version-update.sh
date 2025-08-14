@@ -84,7 +84,7 @@ echo
 if [ -d .git ]; then
     print_message "$YELLOW" "Next steps:"
     echo "  1. Review your changes"
-    echo "  2. Commit: git add VERSION && git commit -m \"Bump version to v$NEW_VERSION\""
+    echo "  2. Commit: git add VERSION && git commit -m \"v$NEW_VERSION\""
     echo "  3. Tag:    git tag -a v$NEW_VERSION -m \"Release v$NEW_VERSION\""
     echo "  4. Push:   git push && git push --tags"
     echo
@@ -98,7 +98,7 @@ if [ -d .git ]; then
         git add VERSION
 
         # Commit
-        git commit -m "Bump version to v$NEW_VERSION"
+        git commit -m "v$NEW_VERSION"
 
         # Create annotated tag
         git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"

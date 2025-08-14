@@ -673,7 +673,7 @@ The current version is displayed:
 ### Areas for Improvement
 - Additional language support (Go, Rust, Java)
 - Enhanced security features
-- Ruleset tuning for Semgrep/YARA to reduce false positives
+- Ruleset tuning for Semgrep/YARA
 - Better IDE integrations
 - Performance optimizations
 - Windows/WSL2 support
