@@ -68,19 +68,8 @@ print_message "$BLUE" "   Sandbox Cleanup Tool                        "
 print_message "$BLUE" "================================================"
 echo
 
-echo
-print_message "$YELLOW" "What would you like to clean?"
-echo "1) Extracted files only"
-echo "2) Submission ZIPs only"
-echo "3) Logs and temp files"
-echo "4) Docker artifacts (keeps current build)"
-echo "5) Everything (full reset)"
-echo "6) Old files (>7 days)"
-echo "7) Exit"
-read -r choice
-
-case $choice in
-1)
+# Function definitions for each cleanup task
+cleanup_extracted_files() {
     echo
     echo -n "  Removing extracted files"
     # Fix permissions first in case they're messed up
@@ -97,14 +86,16 @@ case $choice in
     wait $PID
 
     echo -e "\r  ✓ Extracted files removed                    "
-    ;;
-2)
+}
+
+cleanup_submission_zips() {
     echo
     print_message "$YELLOW" "Removing submission ZIPs..."
     rm -rf submissions/*
     print_message "$GREEN" "✓ Submission files removed"
-    ;;
-3)
+}
+
+cleanup_logs_and_temp() {
     echo
     echo -n "  Cleaning container artifacts"
 
@@ -121,9 +112,10 @@ case $choice in
     done
     wait $PID
 
-    echo -e "\r  ✓ Container artifacts cleaned                 "
-    ;;
-4)
+    echo -e "\r  ✓ Logs and audits cleaned                     "
+}
+
+cleanup_docker_artifacts() {
     echo
     echo -n "  Analyzing Docker build cache and images"
 
@@ -225,8 +217,9 @@ case $choice in
             print_message "$BLUE" "  Cleanup cancelled"
         fi
     fi
-    ;;
-5)
+}
+
+cleanup_everything() {
     print_message "$RED" "⚠️  This will remove all data and reset the sandbox!"
     echo
     print_message "$YELLOW" "Are you sure? (type 'yes' to confirm):"
@@ -290,8 +283,9 @@ case $choice in
     else
         print_message "$BLUE" "Cleanup cancelled"
     fi
-    ;;
-6)
+}
+
+cleanup_old_files() {
     echo
     echo -n "  Scanning for old files"
 
@@ -321,14 +315,56 @@ case $choice in
     else
         echo -e "\r  ✓ No old files found (>7 days)               "
     fi
-    ;;
-7)
-    print_message "$GREEN" "Exiting..."
-    ;;
-*)
-    print_message "$RED" "Invalid choice"
-    ;;
-esac
+}
+
+echo
+print_message "$YELLOW" "What would you like to clean?"
+echo "1) Extracted files only"
+echo "2) Submission ZIPs only"
+echo "3) Logs and temp files"
+echo "4) Docker artifacts (keeps current build)"
+echo "5) Everything (full reset)"
+echo "6) Old files (>7 days)"
+echo "7) Exit"
+echo
+print_message "$BLUE" "You can select multiple options (e.g., 1,2,3)"
+read -r choice
+
+# Parse comma-separated choices and run selected cleanups
+IFS=',' read -ra CHOICES <<<"$choice"
+
+for option in "${CHOICES[@]}"; do
+    # Trim whitespace
+    option=$(echo "$option" | xargs)
+
+    case $option in
+    1)
+        cleanup_extracted_files
+        ;;
+    2)
+        cleanup_submission_zips
+        ;;
+    3)
+        cleanup_logs_and_temp
+        ;;
+    4)
+        cleanup_docker_artifacts
+        ;;
+    5)
+        cleanup_everything
+        ;;
+    6)
+        cleanup_old_files
+        ;;
+    7)
+        print_message "$GREEN" "Exiting..."
+        exit 0
+        ;;
+    *)
+        print_message "$RED" "Invalid choice: $option"
+        ;;
+    esac
+done
 
 # Show disk usage
 echo
