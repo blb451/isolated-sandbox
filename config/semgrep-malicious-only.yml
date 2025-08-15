@@ -141,7 +141,14 @@ rules:
       - pattern-either:
           # File encryption patterns
           - pattern: Crypto.Cipher.AES.new(...)
-          - pattern-regex: '\.encrypted|\.locked|\.crypto'
+          # Ransomware file extensions
+          - pattern-regex: '\.(encrypted|crypto)'
+          # .locked extension - but exclude the specific Bundler line
+          - patterns:
+              - pattern-regex: '\.locked'
+              - pattern-not:
+                  pattern: |
+                    when "gems.rb" then $GEMFILE.sub(/\.rb$/, ".locked")
           # Ransom note creation
           - pattern-regex: 'YOUR FILES HAVE BEEN ENCRYPTED'
           - pattern-regex: 'pay.*bitcoin.*decrypt'
