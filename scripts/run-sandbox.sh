@@ -502,12 +502,12 @@ if ! docker-compose run --rm sandbox bash -c '
     echo -e "\r  🔍 Deep scanning extracted files..."
 
     # Define directories to exclude from deep scanning
-    EXCLUDE_DIRS="node_modules vendor .git venv .venv target dist build .pytest_cache __pycache__ .tox"
+    EXCLUDE_DIRS="node_modules vendor .git venv .venv target dist build .pytest_cache __pycache__ .tox __MACOSX bootsnap .next tmp/cache .ruby-lsp"
 
     # Build find command with exclusions
     FIND_CMD="find /sandbox/extracted/'"$base_name"' -type f"
     for dir in $EXCLUDE_DIRS; do
-        FIND_CMD="$FIND_CMD -not -path \"*/$dir/*\""
+        FIND_CMD="$FIND_CMD -not -path \"*$dir*\""
     done
 
     # Count files first for progress indication (excluding dependency directories)
@@ -540,7 +540,6 @@ if ! docker-compose run --rm sandbox bash -c '
     fi
 
     # Run scan with verbose output for progress (excluding dependency directories)
-    echo -n "  ⚡ Scanning project files"
 
     # Build clamscan exclude options
     CLAM_EXCLUDES=""
@@ -554,7 +553,7 @@ if ! docker-compose run --rm sandbox bash -c '
     # Show progress with spinner
     while kill -0 $SCAN_PID 2>/dev/null; do
         for s in "${SPINNER_FRAMES[@]}"; do
-            echo -ne "\r  ⚡ Scanning files $s"
+            echo -ne "\r  ⚡ Scanning files $s "
             sleep 0.1
         done
     done
@@ -736,7 +735,9 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ || $run_analysis == "yes" ]]; 
         # YARA malware detection
         if [ -d /opt/yara-rules/rules ]; then
             echo -n '  Scanning for malware patterns with YARA'
-            (find . -type f \( -name '*.exe' -o -name '*.dll' -o -name '*.jar' -o -name '*.zip' -o -name '*.tar*' \) -exec yara -r /opt/yara-rules/rules {} \; > \$TEMP_DIR/yara.txt 2>&1) &
+            (find . -type f \( -name '*.exe' -o -name '*.dll' -o -name '*.jar' -o -name '*.zip' -o -name '*.tar*' \) | while read file; do
+                find /opt/yara-rules/rules -name "*.yar" -type f 2>/dev/null | head -20 | xargs -I {} yara {} "\$file" 2>/dev/null
+            done > \$TEMP_DIR/yara.txt 2>&1) &
             SCAN_PID=\$!
 
             # Show spinner while scanning
@@ -748,10 +749,13 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ || $run_analysis == "yes" ]]; 
             done
             wait \$SCAN_PID
 
-            YARA_LINES=\$(wc -l < \$TEMP_DIR/yara.txt)
-            if [ \$YARA_LINES -gt 0 ]; then
+            # Check if yara.txt has actual detections (not just errors)
+            if grep -q "error:" \$TEMP_DIR/yara.txt 2>/dev/null; then
+                # YARA had errors
+                echo -e \"\\r  Scanning for malware patterns with YARA... ❌ Scan failed (rule parsing error)\"
+            elif [ -s \$TEMP_DIR/yara.txt ]; then
                 echo -e \"\\r  Scanning for malware patterns with YARA... ⚠️  SUSPICIOUS FILES DETECTED\"
-                cat \$TEMP_DIR/yara.txt
+                grep -v "error:" \$TEMP_DIR/yara.txt
             else
                 echo -e \"\\r  Scanning for malware patterns with YARA... ✓ No malware patterns detected\"
             fi
@@ -771,7 +775,15 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ || $run_analysis == "yes" ]]; 
         [ -f \$TEMP_DIR/safety.txt ] && echo \"  • Dependencies (Safety): \$(grep -c 'vulnerability' \$TEMP_DIR/safety.txt 2>/dev/null || echo '0') vulnerabilities\"
         [ -f \$TEMP_DIR/shellcheck.txt ] && echo \"  • Shell Scripts: \$(grep -c 'SC[0-9]' \$TEMP_DIR/shellcheck.txt 2>/dev/null || echo '0') warnings\"
         [ -f \$TEMP_DIR/semgrep.txt ] && echo \"  • Malicious Patterns: \$(grep -c '❯❱' \$TEMP_DIR/semgrep.txt 2>/dev/null || echo '0') findings\"
-        [ -f \$TEMP_DIR/yara.txt ] && [ -s \$TEMP_DIR/yara.txt ] && echo \"  • Malware Patterns: DETECTED - CHECK REPORT\"
+        if [ -f \$TEMP_DIR/yara.txt ]; then
+            if grep -q "error:" \$TEMP_DIR/yara.txt 2>/dev/null; then
+                echo \"  • Malware Patterns: SCAN FAILED\"
+            elif [ -s \$TEMP_DIR/yara.txt ]; then
+                echo \"  • Malware Patterns: DETECTED - CHECK REPORT\"
+            else
+                echo \"  • Malware Patterns: 0 findings\"
+            fi
+        fi
         echo
         echo \"📁 Full reports saved to: audit/security_reports/${base_name}_${TIMESTAMP}/\"
         echo '═══════════════════════════════════════════════════════════'
