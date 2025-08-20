@@ -708,14 +708,14 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ || $run_analysis == "yes" ]]; 
         # Malicious code detection with Semgrep
         # Uses custom rules to detect only code that could harm the host machine
         # (command execution, backdoors, ransomware, etc.) - not general security issues
-        echo -n '  Scanning for malicious code patterns'
+        echo -n '  Scanning for malicious code patterns with Semgrep'
         (PYTHONWARNINGS="ignore::UserWarning" semgrep --config=/sandbox/config/semgrep-malicious-only.yml --quiet . > \$TEMP_DIR/semgrep.txt 2>&1) &
         SCAN_PID=\$!
 
         # Show spinner while scanning
         while kill -0 \$SCAN_PID 2>/dev/null; do
             for s in \"\${SPINNER_FRAMES[@]}\"; do
-                echo -ne \"\\r  Running Semgrep security patterns \$s\"
+                echo -ne \"\\r  Scanning for malicious code patterns with Semgrep \$s\"
                 sleep 0.1
             done
         done
@@ -723,11 +723,11 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ || $run_analysis == "yes" ]]; 
 
         SEMGREP_LINES=\$(wc -l < \$TEMP_DIR/semgrep.txt)
         if [ \$SEMGREP_LINES -gt 50 ]; then
-            echo -e \"\\r  Scanning for malicious code patterns... ✓ (found \$SEMGREP_LINES lines - saved)      \"
+            echo -e \"\\r  Scanning for malicious code patterns with Semgrep... ✓ (found \$SEMGREP_LINES lines - saved)      \"
             head -20 \$TEMP_DIR/semgrep.txt
             echo \"    ... output truncated. Full report saved to: audit/security_reports/\"
         else
-            echo -e \"\\r  Scanning for malicious code patterns... ✓                      \"
+            echo -e \"\\r  Scanning for malicious code patterns with Semgrep... ✓                      \"
             cat \$TEMP_DIR/semgrep.txt
         fi
         echo
@@ -771,17 +771,17 @@ if [[ -z $run_analysis || $run_analysis =~ ^[Yy]$ || $run_analysis == "yes" ]]; 
         echo '═══════════════════════════════════════════════════════════'
         echo '📊 Security Analysis Summary:'
         echo
-        [ -f \$TEMP_DIR/bandit.txt ] && echo \"  • Python (Bandit): \$(grep -c 'Issue:' \$TEMP_DIR/bandit.txt 2>/dev/null || echo '0') issues found\"
-        [ -f \$TEMP_DIR/safety.txt ] && echo \"  • Dependencies (Safety): \$(grep -c 'vulnerability' \$TEMP_DIR/safety.txt 2>/dev/null || echo '0') vulnerabilities\"
-        [ -f \$TEMP_DIR/shellcheck.txt ] && echo \"  • Shell Scripts: \$(grep -c 'SC[0-9]' \$TEMP_DIR/shellcheck.txt 2>/dev/null || echo '0') warnings\"
-        [ -f \$TEMP_DIR/semgrep.txt ] && echo \"  • Malicious Patterns: \$(grep -c '❯❱' \$TEMP_DIR/semgrep.txt 2>/dev/null || echo '0') findings\"
+        [ -f \$TEMP_DIR/bandit.txt ] && echo \"  • Python (Bandit): \$(grep -c 'Issue:' \$TEMP_DIR/bandit.txt 2>/dev/null)\"
+        [ -f \$TEMP_DIR/safety.txt ] && echo \"  • Dependencies (Safety): \$(grep -c 'vulnerability' \$TEMP_DIR/safety.txt 2>/dev/null)\"
+        [ -f \$TEMP_DIR/shellcheck.txt ] && echo \"  • Shell Scripts (ShellCheck): \$(grep -c 'SC[0-9]' \$TEMP_DIR/shellcheck.txt 2>/dev/null)\"
+        [ -f \$TEMP_DIR/semgrep.txt ] && echo \"  • Malicious Patterns (Semgrep): \$(grep -c '❯❱' \$TEMP_DIR/semgrep.txt 2>/dev/null)\"
         if [ -f \$TEMP_DIR/yara.txt ]; then
-            if grep -q "error:" \$TEMP_DIR/yara.txt 2>/dev/null; then
-                echo \"  • Malware Patterns: SCAN FAILED\"
+            if grep -q \"error:\" \$TEMP_DIR/yara.txt 2>/dev/null; then
+                echo \"  • Malware Patterns (YARA): SCAN FAILED\"
             elif [ -s \$TEMP_DIR/yara.txt ]; then
-                echo \"  • Malware Patterns: DETECTED - CHECK REPORT\"
+                echo \"  • Malware Patterns (YARA): DETECTED - CHECK REPORT\"
             else
-                echo \"  • Malware Patterns: 0 findings\"
+                echo \"  • Malware Patterns (YARA): 0\"
             fi
         fi
         echo
