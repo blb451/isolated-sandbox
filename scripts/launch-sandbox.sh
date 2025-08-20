@@ -5,6 +5,14 @@
 SANDBOX_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 EXTRACTED_PATH="${1:-/sandbox/extracted/example-app}"
 
+# Check if a sandbox container is already running
+EXISTING_CONTAINER=$(docker ps --filter "ancestor=thanx-isolated-sandbox-sandbox" --format "{{.ID}}" | head -1)
+
+if [ -n "$EXISTING_CONTAINER" ]; then
+    echo "Connecting to existing sandbox container: $EXISTING_CONTAINER"
+    exec docker exec -it "$EXISTING_CONTAINER" bash -c "cd '$EXTRACTED_PATH' && bash"
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -36,8 +44,8 @@ find_available_port() {
 PORT_ARGS=""
 
 # Define standard ports and their purposes
-declare -a STANDARD_PORTS=("3000" "5173" "8080" "5000" "8000")
-declare -a PORT_NAMES=("Rails/Node" "Vite" "Generic" "Flask" "Django")
+declare -a STANDARD_PORTS=("3000" "3001" "5173" "8080" "5000" "8000")
+declare -a PORT_NAMES=("Rails/Node" "Generic Alt" "Vite" "Generic" "Flask" "Django")
 
 echo ""
 echo -e "${CYAN}================================================${NC}"
