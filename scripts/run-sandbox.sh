@@ -249,61 +249,34 @@ for submission_name in "${submission_names[@]}"; do
             echo
         fi
 
-        echo "🔍 Running multi-engine virus scan..."
+        echo "🔍 Running virus scan on ZIP file..."
         echo ""
 
         # 1. ClamAV scan with spinner
-        echo -n "  [1/3] ClamAV: Scanning"
+        echo -n "  [1/2] ClamAV: Scanning"
         (clamscan --infected --no-summary "$FILE_PATH" > /tmp/clam_result 2>&1) &
         SCAN_PID=$!
 
         # Show spinner while scanning
         while kill -0 $SCAN_PID 2>/dev/null; do
             for s in "${SPINNER_FRAMES[@]}"; do
-                echo -ne "\r  [1/3] ClamAV: Scanning $s"
+                echo -ne "\r  [1/2] ClamAV: Scanning $s"
                 sleep 0.1
             done
         done
         wait $SCAN_PID
 
         if grep -q "FOUND" /tmp/clam_result 2>/dev/null; then
-            echo -e "\r  [1/3] ClamAV: ❌ THREAT DETECTED    "
+            echo -e "\r  [1/2] ClamAV: ❌ THREAT DETECTED    "
             THREATS_FOUND=$((THREATS_FOUND + 1))
         else
-            echo -e "\r  [1/3] ClamAV: ✅ Clean              "
+            echo -e "\r  [1/2] ClamAV: ✅ Clean              "
         fi
         rm -f /tmp/clam_result
 
-        # 2. Rootkit Hunter scan (quick mode for archives) with progress
-        echo -n "  [2/3] RKHunter: Extracting"
-        TEMP_DIR=$(mktemp -d)
-        unzip -q "$FILE_PATH" -d "$TEMP_DIR" 2>/dev/null || true
-
-        echo -ne "\r  [2/3] RKHunter: Scanning  "
-        (rkhunter --check --skip-keypress --quiet --no-mail-on-warning --disable all --enable hidden_files --enable hidden_dirs --enable suspicious_files --pkgmgr NONE --rwo "$TEMP_DIR" > /tmp/rk_result 2>&1) &
-        SCAN_PID=$!
-
-        # Show spinner while scanning
-        while kill -0 $SCAN_PID 2>/dev/null; do
-            for s in "${SPINNER_FRAMES[@]}"; do
-                echo -ne "\r  [2/3] RKHunter: Scanning $s"
-                sleep 0.1
-            done
-        done
-        wait $SCAN_PID
-
-        if grep -q "Warning" /tmp/rk_result 2>/dev/null; then
-            echo -e "\r  [2/3] RKHunter: ⚠️  Suspicious patterns found    "
-            THREATS_FOUND=$((THREATS_FOUND + 1))
-        else
-            echo -e "\r  [2/3] RKHunter: ✅ Clean                        "
-        fi
-        rm -rf "$TEMP_DIR"
-        rm -f /tmp/rk_result
-
-        # 3. YARA rules scan (if available) with progress
+        # 2. YARA rules scan (if available) with progress
         if [ -d /opt/yara-rules/rules ] && command -v yara >/dev/null 2>&1; then
-            echo -n "  [3/3] YARA Rules: Scanning"
+            echo -n "  [2/2] YARA Rules: Scanning"
             # Find and compile only .yar files, avoiding directories and other files
             (find /opt/yara-rules/rules -name "*.yar" -type f 2>/dev/null | head -20 | xargs -I {} yara {} "$FILE_PATH" 2>/tmp/yara_warnings > /tmp/yara_result) &
             SCAN_PID=$!
@@ -311,7 +284,7 @@ for submission_name in "${submission_names[@]}"; do
             # Show spinner while scanning
             while kill -0 $SCAN_PID 2>/dev/null; do
                 for s in "${SPINNER_FRAMES[@]}"; do
-                    echo -ne "\r  [3/3] YARA Rules: Scanning $s"
+                    echo -ne "\r  [2/2] YARA Rules: Scanning $s"
                     sleep 0.1
                 done
             done
@@ -327,7 +300,7 @@ for submission_name in "${submission_names[@]}"; do
             YARA_WARNINGS=$(cat /tmp/yara_warnings 2>/dev/null | grep "^warning:" | wc -l)
 
             if [ -n "$YARA_RESULT" ]; then
-                echo -e "\r  [3/3] YARA Rules: ⚠️  SUSPICIOUS PATTERNS    "
+                echo -e "\r  [2/2] YARA Rules: ⚠️  SUSPICIOUS PATTERNS    "
                 YARA_SUSPICIOUS=1
 
                 # Save full results to audit folder
@@ -351,11 +324,11 @@ for submission_name in "${submission_names[@]}"; do
                 fi
                 echo "  Full results saved to: audit/${SUBMISSION_BASE}_yara_scan.txt"
             else
-                echo -e "\r  [3/3] YARA Rules: ✅ Clean                  "
+                echo -e "\r  [2/2] YARA Rules: ✅ Clean                  "
             fi
             rm -f /tmp/yara_result /tmp/yara_warnings
         else
-            echo "  [3/3] YARA: ⏭️  Skipped (rules not loaded)"
+            echo "  [2/2] YARA: ⏭️  Skipped (rules not loaded)"
         fi
 
         echo ""
@@ -562,15 +535,39 @@ if ! docker-compose run --rm sandbox bash -c '
 
     # Check results
     if [ $SCAN_EXIT -eq 0 ]; then
-        echo -e "\r  ✅ Deep scan complete - no threats found        "
-        exit 0
+        echo -e "\r  ✅ ClamAV deep scan complete - no threats found        "
     else
         if grep -q "FOUND" /tmp/deep_scan 2>/dev/null; then
-            echo -e "\r  ❌ Deep scan found infected files!             "
+            echo -e "\r  ❌ ClamAV deep scan found infected files!             "
             grep "FOUND" /tmp/deep_scan | head -5
+            exit 1
         fi
-        exit 1
     fi
+
+    # Run RKHunter on extracted files
+    echo -n "  🔍 Running RKHunter on extracted files"
+    (rkhunter --check --skip-keypress --quiet --no-mail-on-warning --disable all --enable hidden_files --enable hidden_dirs --enable suspicious_files --pkgmgr NONE --rwo /sandbox/extracted/'"$base_name"' > /tmp/rk_deep_result 2>&1) &
+    SCAN_PID=$!
+
+    # Show spinner while scanning
+    while kill -0 $SCAN_PID 2>/dev/null; do
+        for s in "${SPINNER_FRAMES[@]}"; do
+            echo -ne "\r  🔍 Running RKHunter on extracted files $s"
+            sleep 0.1
+        done
+    done
+    wait $SCAN_PID
+
+    if grep -q "Warning" /tmp/rk_deep_result 2>/dev/null; then
+        echo -e "\r  ⚠️  RKHunter: Suspicious patterns found                 "
+        grep "Warning" /tmp/rk_deep_result | head -5
+        echo "  Full RKHunter results saved to /tmp/rk_deep_result"
+    else
+        echo -e "\r  ✅ RKHunter: No suspicious files detected               "
+    fi
+    rm -f /tmp/rk_deep_result
+
+    exit 0
 '; then
     # Check if the failure was due to Docker issues
     if ! check_docker; then
